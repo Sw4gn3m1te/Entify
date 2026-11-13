@@ -17,10 +17,11 @@ pip install -e .
 ## Usage
 
 ```bash
-entify detect PATH [options]
+entify detect PATH [options]                 # detect and count objects
+entify highlight PATH -s CATEGORY [CATEGORY ...] [options]  # highlight categories, dim the rest
 ```
 
-`python main.py detect ...` and `python -m entify detect ...` work the same way.
+`python main.py ...` and `python -m entify ...` work the same way.
 
 | Argument | Long form | Description |
 |---|---|---|
@@ -28,7 +29,10 @@ entify detect PATH [options]
 | `-c` | `--confidence` | Minimum detection score, 0 to 1 (default: 0.5) <br> 0 = accept all detections, 1 = reject all detections  |
 | `-o` | `--overlap` | Maximum overlap (IoU) of two detections, 0 to 1 (default: 0.5) <br> 0 = allow no overlap, 1 = allow identical boxes |
 | `-p` | `--preset` | KerasHub D-FINE preset (default: `dfine_small_coco`) |
-| – | `--csv` | Write results to a CSV file (default: `outputs/results.csv`) |
+| – | `--csv` | Write results to a CSV file, only when given (default file: `outputs/results.csv`) |
+| `-s` | `--sort` | `highlight` only, required: one or more COCO categories to highlight <br> `-s bird car` and `-s bird -s car` both work, quote names with spaces: `-s "cell phone"` |
+| – | `--print-confidence` | `highlight` only: print the confidence score (2 decimals) next to each box |
+| – | `--out` | `highlight` only: folder for the highlighted images (default: `outputs`) |
 | `-v` | `--verbose` | Show TensorFlow and KerasHub log messages |
 | `-h` | `--help` | Show the help message |
 | – | `--version` | Show the version |
@@ -39,6 +43,8 @@ Example:
 
 ```bash
 entify detect photos/ --confidence 0.3 --csv outputs/counts.csv
+entify highlight photos/ -s person --out outputs/people
+entify highlight photos/ -s car truck --print-confidence
 ```
 
 ## License

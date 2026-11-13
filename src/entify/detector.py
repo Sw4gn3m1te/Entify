@@ -1,5 +1,7 @@
 import contextlib
+import os
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -7,6 +9,7 @@ from PIL import Image
 from entify.quiet import silence_library_logs, silenced_stderr
 
 DEFAULT_PRESET = "dfine_small_coco"
+MODEL_DIR = Path("models")
 
 COCO_CLASSES = (
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
@@ -27,6 +30,10 @@ class Detections:
     scores: np.ndarray
     labels: np.ndarray
 
+    def only(self, label):
+        keep = self.labels == label
+        return Detections(self.boxes[keep], self.scores[keep], self.labels[keep])
+
 
 class Detector:
     class_names = COCO_CLASSES
@@ -34,6 +41,7 @@ class Detector:
     def __init__(self, preset=DEFAULT_PRESET, confidence=0.5, overlap=0.5, verbose=False):
         if not verbose:
             silence_library_logs()
+        os.environ.setdefault("KAGGLEHUB_CACHE", str(MODEL_DIR.resolve()))
         with contextlib.nullcontext() if verbose else silenced_stderr():
             import keras_hub
 

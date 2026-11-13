@@ -18,3 +18,8 @@ def find_images(path):
 def load_image(path):
     with Image.open(path) as image:
         return np.asarray(ImageOps.exif_transpose(image).convert("RGB"))
+
+
+def save_image(figure, path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(path, dpi=figure.dpi, pil_kwargs={"quality": 90})
