@@ -18,7 +18,7 @@ pip install -e .
 
 ```bash
 entify detect PATH [options]                 # detect and count objects
-entify highlight PATH -s CATEGORY [CATEGORY ...] [options]  # highlight categories, dim the rest
+entify highlight PATH -s CATEGORY [CATEGORY ...] [options]  # draw boxes around the chosen categories
 ```
 
 `python main.py ...` and `python -m entify ...` work the same way.
@@ -30,8 +30,9 @@ entify highlight PATH -s CATEGORY [CATEGORY ...] [options]  # highlight categori
 | `-o` | `--overlap` | Maximum overlap (IoU) of two detections, 0 to 1 (default: 0.5) <br> 0 = allow no overlap, 1 = allow identical boxes |
 | `-p` | `--preset` | KerasHub D-FINE preset (default: `dfine_small_coco`) |
 | – | `--csv` | Write results to a CSV file, only when given (default file: `outputs/results.csv`) |
-| `-s` | `--sort` | `highlight` only, required: one or more COCO categories to highlight <br> `-s bird car` and `-s bird -s car` both work, quote names with spaces: `-s "cell phone"` |
+| `-s` | `--sort` | `highlight` only, required: one or more COCO categories to highlight, `*` selects all <br> `-s bird car` and `-s bird -s car` both work, quote names with spaces: `-s "cell phone"` |
 | – | `--print-confidence` | `highlight` only: print the confidence score (2 decimals) next to each box |
+| – | `--dim` | `highlight` only: darken everything outside the boxes |
 | – | `--out` | `highlight` only: folder for the highlighted images (default: `outputs`) |
 | `-v` | `--verbose` | Show TensorFlow and KerasHub log messages |
 | `-h` | `--help` | Show the help message |
@@ -39,12 +40,17 @@ entify highlight PATH -s CATEGORY [CATEGORY ...] [options]  # highlight categori
 
 If two detections overlap more than `--overlap`, the one with the lower score is removed. `--overlap 1` keeps all detections.
 
+When several categories are selected, each object gets the selected category with the highest score.
+In Git Bash, quote the asterisk (`-s '*'`), otherwise the shell replaces it with file names.
+Highlighted images keep the original pixels. Images narrower than 2560 px are saved at a whole-number multiple of their size so that labels stay sharp.
+
 Example:
 
 ```bash
 entify detect photos/ --confidence 0.3 --csv outputs/counts.csv
 entify highlight photos/ -s person --out outputs/people
 entify highlight photos/ -s car truck --print-confidence
+entify highlight photos/ -s '*' --dim
 ```
 
 ## License

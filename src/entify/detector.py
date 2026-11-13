@@ -38,21 +38,20 @@ class Detections:
 class Detector:
     class_names = COCO_CLASSES
 
-    def __init__(self, preset=DEFAULT_PRESET, confidence=0.5, overlap=0.5, verbose=False):
+    def __init__(self, preset=DEFAULT_PRESET, confidence=0.5, overlap=0.5, verbose=False, classes=None):
         if not verbose:
             silence_library_logs()
         os.environ.setdefault("KAGGLEHUB_CACHE", str(MODEL_DIR.resolve()))
         with contextlib.nullcontext() if verbose else silenced_stderr():
             import keras_hub
 
-            self.model = keras_hub.models.ObjectDetector.from_preset(preset)
-            self.model.prediction_decoder = self._decoder(confidence, overlap)
-        self.input_size = tuple(self.model.preprocessor.image_converter.image_size)
+            from entify.decoder import SelectedClassesNMS
 
-    def _decoder(self, confidence, overlap):
-        decoder = self.model.prediction_decoder
-        config = decoder.get_config() | {"confidence_threshold": confidence, "iou_threshold": overlap}
-        return type(decoder).from_config(config)
+            self.model = keras_hub.models.ObjectDetector.from_preset(preset)
+            config = self.model.prediction_decoder.get_config()
+            config |= {"confidence_threshold": confidence, "iou_threshold": overlap}
+            self.model.prediction_decoder = SelectedClassesNMS(classes=classes, **config)
+        self.input_size = tuple(self.model.preprocessor.image_converter.image_size)
 
     def detect(self, image):
         height, width = image.shape[:2]

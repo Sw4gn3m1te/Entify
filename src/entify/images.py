@@ -22,4 +22,4 @@ def load_image(path):
 
 def save_image(figure, path):
     path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(path, dpi=figure.dpi, pil_kwargs={"quality": 90})
+    figure.savefig(path, dpi=figure.dpi, pil_kwargs={"quality": 95, "subsampling": 0})
