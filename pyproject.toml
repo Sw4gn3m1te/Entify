@@ -21,5 +21,8 @@ dependencies = [
     "pillow",
 ]
 
+[project.scripts]
+entify = "entify.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
