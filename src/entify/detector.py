@@ -30,9 +30,22 @@ class Detections:
     scores: np.ndarray
     labels: np.ndarray
 
-    def only(self, label):
-        keep = self.labels == label
+    def where(self, keep):
         return Detections(self.boxes[keep], self.scores[keep], self.labels[keep])
+
+    def only(self, label):
+        return self.where(self.labels == label)
+
+    def shifted(self, x, y):
+        return Detections(self.boxes + [x, y, x, y], self.scores, self.labels)
+
+    @staticmethod
+    def concatenate(parts):
+        return Detections(
+            np.concatenate([part.boxes for part in parts]).reshape(-1, 4),
+            np.concatenate([part.scores for part in parts]),
+            np.concatenate([part.labels for part in parts]),
+        )
 
 
 class Detector:
