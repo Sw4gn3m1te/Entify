@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Environments
+.venv/
+venv/
+.env
+
+# Tools
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Data, model weights and outputs
+data/
+models/
+outputs/
+*.h5
+*.keras
+*.weights.h5
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
