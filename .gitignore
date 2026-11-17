@@ -20,8 +20,8 @@ htmlcov/
 
 # Data, model weights and outputs
 data/
-models/
-outputs/
+/models/
+/outputs/
 *.h5
 *.keras
 *.weights.h5

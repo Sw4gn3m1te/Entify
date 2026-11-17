@@ -1,8 +1,8 @@
 import numpy as np
 from tqdm import tqdm
 
-from entify.detector import Detections
 from entify.geometry import areas, intersection_areas, iou
+from entify.models import Detections
 
 TILE_SIZE = 640
 TILE_OVERLAP = 0.2

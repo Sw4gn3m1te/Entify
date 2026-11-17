@@ -7,7 +7,7 @@ from pathlib import Path
 
 from entify import __version__, evaluation
 from entify.cli import DEFAULT_THRESHOLDS, fraction, predict_dataset
-from entify.detector import COCO_CLASSES, DEFAULT_PRESET, Detector
+from entify.models import DEFAULT_MODEL, load_model
 
 BENCHMARK_DIR = Path(__file__).resolve().parent
 DATA_DIR = BENCHMARK_DIR / "data"
@@ -33,9 +33,9 @@ def fetch_subset(seed):
 def run(args, dataset):
     truth, files = evaluation.load_ground_truth(dataset / "annotations.json")
     thresholds = sorted(set(args.thresholds))
-    detector = Detector(args.preset, thresholds[0], args.overlap)
-    predictions = predict_dataset(detector, dataset, files, args, thresholds[0])
-    return truth, evaluation.evaluate(truth, predictions, thresholds, COCO_CLASSES)
+    model = load_model(args.model, args.labels, thresholds[0], args.overlap)
+    predictions = predict_dataset(model, dataset, files, args, thresholds[0])
+    return truth, evaluation.evaluate(truth, predictions, thresholds, model.categories)
 
 
 def write_results(args, truth, results, runtime):
@@ -45,7 +45,7 @@ def write_results(args, truth, results, runtime):
     settings = [
         ("Date", date.today().isoformat()),
         ("Entify version", __version__),
-        ("Model preset", f"`{args.preset}`"),
+        ("Model", f"`{args.model}`"),
         ("COCO subset seed", str(args.seed)),
         ("Images", f"{images} (COCO val2017, chosen by `scripts/fetch_coco_subset.py`)"),
         ("Ground-truth objects", str(len(truth))),
@@ -92,8 +92,8 @@ def write_results(args, truth, results, runtime):
 
 def reproduce_arguments(args):
     parts = [f"--seed {args.seed}"]
-    if args.preset != DEFAULT_PRESET:
-        parts.append(f"--preset {args.preset}")
+    if args.model != DEFAULT_MODEL:
+        parts.append(f"--model {args.model}")
     if args.overlap != 0.5:
         parts.append(f"--overlap {args.overlap}")
     if args.tile:
@@ -109,7 +109,8 @@ def main():
     parser = argparse.ArgumentParser(description="Benchmark Entify's counting accuracy on a COCO val2017 subset.")
     parser.add_argument("--seed", type=int, default=0, help="seed for choosing the COCO subset (default: 0)")
     parser.add_argument("--thresholds", type=fraction, nargs="+", default=DEFAULT_THRESHOLDS, metavar="VALUE")
-    parser.add_argument("-p", "--preset", default=DEFAULT_PRESET)
+    parser.add_argument("-m", "--model", "--preset", dest="model", default=DEFAULT_MODEL)
+    parser.add_argument("--labels", type=Path, metavar="FILE")
     parser.add_argument("-o", "--overlap", type=fraction, default=0.5)
     parser.add_argument("-t", "--tile", action="store_true")
     parser.add_argument("--sharpen", type=float, nargs="?", const=1.0, metavar="AMOUNT")

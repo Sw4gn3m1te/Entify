@@ -4,16 +4,16 @@ Counting accuracy on a COCO val2017 subset, compared with the COCO ground truth.
 
 | Setting | Value |
 |---|---|
-| Date | 2026-11-13 |
-| Entify version | 0.3.0 |
-| Model preset | `dfine_small_coco` |
+| Date | 2026-11-17 |
+| Entify version | 0.4.0 |
+| Model | `dfine_small_coco` |
 | COCO subset seed | 0 |
 | Images | 85 (COCO val2017, chosen by `scripts/fetch_coco_subset.py`) |
 | Ground-truth objects | 933 |
 | Overlap (IoU) | 0.5 |
 | Tiling | off |
 | Sharpening | off |
-| Runtime | 29 s |
+| Runtime | 40 s |
 
 ## Counting error by confidence threshold
 

@@ -2,12 +2,15 @@ import math
 
 import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.colors import to_rgb
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
+from scipy import ndimage
 
 from entify.geometry import intersection_areas
 
 DIM_FACTOR = 0.35
+MASK_ALPHA = 0.4
 COLORS = (
     "#ffd400", "#00e5ff", "#ff4fd8", "#7cfc00", "#ff9f1a", "#b388ff",
     "#ff6b6b", "#ffffff", "#c6ff00", "#80cbc4", "#ffab91", "#f48fb1",
@@ -17,12 +20,44 @@ DPI = 1
 MIN_OUTPUT_WIDTH = 2560
 
 
-def dim(image, boxes, factor=DIM_FACTOR):
-    height, width = image.shape[:2]
-    inside = np.zeros((height, width), dtype=bool)
-    for x1, y1, x2, y2 in np.clip(boxes.round().astype(int), 0, [width, height, width, height]):
-        inside[y1:y2, x1:x2] = True
+def mark_object(target, box, mask=None):
+    # Set the pixels of one object in a full-size boolean array: its segmentation mask, or its box if it has none.
+    height, width = target.shape
+    x1, y1, x2, y2 = np.clip(np.round(box).astype(int), 0, [width, height, width, height])
+    if mask is None:
+        target[y1:y2, x1:x2] = True
+    else:
+        target[y1:y1 + mask.shape[0], x1:x1 + mask.shape[1]] |= mask[:height - y1, :width - x1]
+
+
+def object_masks(detections, shape):
+    for box, mask in zip(detections.boxes, detections.masks):
+        full = np.zeros(shape[:2], dtype=bool)
+        mark_object(full, box, mask)
+        yield full
+
+
+def dim(image, groups, factor=DIM_FACTOR):
+    inside = np.zeros(image.shape[:2], dtype=bool)
+    for _, detections in groups:
+        masks = detections.masks if detections.masks is not None else [None] * len(detections.boxes)
+        for box, mask in zip(detections.boxes, masks):
+            mark_object(inside, box, mask)
     return np.where(inside[..., None], image, (image * factor).astype(np.uint8))
+
+
+def paint_masks(image, groups, colors, thickness):
+    # Fill each segmented object with its category colour and draw its outline.
+    painted = image.astype(np.float32)
+    for category, detections in groups:
+        if detections.masks is None:
+            continue
+        color = np.array(to_rgb(colors[category])) * 255
+        for mask in object_masks(detections, image.shape):
+            outline = mask & ~ndimage.binary_erosion(mask, iterations=thickness)
+            painted[mask] = (1 - MASK_ALPHA) * painted[mask] + MASK_ALPHA * color
+            painted[outline] = color
+    return painted.astype(np.uint8)
 
 
 def overlap_area(rect, rects):
@@ -117,11 +152,16 @@ def label_text(category, score, show_category, show_confidence):
 
 def render(image, groups, show_confidence=False, dim_rest=False):
     boxes = np.concatenate([np.zeros((0, 4))] + [detections.boxes for _, detections in groups])
-    canvas = Canvas(dim(image, boxes) if dim_rest else image)
     colors = dict(zip((category for category, _ in groups), COLORS * (len(groups) // len(COLORS) + 1)))
+    line_pixels = max(1.4, image.shape[1] / 576)
+    if dim_rest:
+        image = dim(image, groups)
+    image = paint_masks(image, groups, colors, max(1, round(line_pixels)))
+    canvas = Canvas(image)
 
-    line_pixels = max(1.4, canvas.width / 576)
     for category, detections in groups:
+        if detections.masks is not None:
+            continue
         for x1, y1, x2, y2 in detections.boxes:
             canvas.axes.add_patch(
                 Rectangle((x1, y1), x2 - x1, y2 - y1, fill=False, edgecolor=colors[category], linewidth=points(line_pixels))
