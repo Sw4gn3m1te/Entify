@@ -9,7 +9,16 @@ from PIL import Image
 from entify.quiet import silence_library_logs, silenced_stderr
 
 DEFAULT_PRESET = "dfine_small_coco"
-MODEL_DIR = Path("models")
+
+def model_dir():
+    # Keep the weights in the project's models/ folder when running from the source tree, otherwise in the user's cache.
+    project_root = Path(__file__).resolve().parents[2]
+    if (project_root / "pyproject.toml").is_file():
+        return project_root / "models"
+    return Path.home() / ".cache" / "entify" / "models"
+
+
+MODEL_DIR = model_dir()
 
 COCO_CLASSES = (
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
@@ -54,7 +63,7 @@ class Detector:
     def __init__(self, preset=DEFAULT_PRESET, confidence=0.5, overlap=0.5, verbose=False, classes=None):
         if not verbose:
             silence_library_logs()
-        os.environ.setdefault("KAGGLEHUB_CACHE", str(MODEL_DIR.resolve()))
+        os.environ.setdefault("KAGGLEHUB_CACHE", str(MODEL_DIR))
         with contextlib.nullcontext() if verbose else silenced_stderr():
             import keras_hub
 
