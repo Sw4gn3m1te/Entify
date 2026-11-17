@@ -6,9 +6,8 @@ from datetime import date
 from pathlib import Path
 
 from entify import __version__, evaluation
-from entify.cli import DEFAULT_THRESHOLDS, find_objects, fraction
+from entify.cli import DEFAULT_THRESHOLDS, fraction, predict_dataset
 from entify.detector import COCO_CLASSES, DEFAULT_PRESET, Detector
-from entify.images import load_image
 
 BENCHMARK_DIR = Path(__file__).resolve().parent
 DATA_DIR = BENCHMARK_DIR / "data"
@@ -35,10 +34,7 @@ def run(args, dataset):
     truth, files = evaluation.load_ground_truth(dataset / "annotations.json")
     thresholds = sorted(set(args.thresholds))
     detector = Detector(args.preset, thresholds[0], args.overlap)
-    predictions = {}
-    for n, name in enumerate(files, 1):
-        predictions[name] = find_objects(detector, load_image(dataset / "images" / name), args)
-        print(f"[{n}/{len(files)}] {name}")
+    predictions = predict_dataset(detector, dataset, files, args, thresholds[0])
     return truth, evaluation.evaluate(truth, predictions, thresholds, COCO_CLASSES)
 
 

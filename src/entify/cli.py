@@ -1,6 +1,8 @@
 import argparse
 from pathlib import Path
 
+from tqdm import tqdm
+
 from entify import __version__
 from entify import evaluation
 from entify.counting import count_by_category, totals
@@ -25,13 +27,26 @@ def fraction(text):
     return value
 
 
+def progress(items):
+    # One bar over all images, hidden for a single image and when the output is not a terminal.
+    return tqdm(items, desc="images", unit="img", disable=None if len(items) > 1 else True)
+
+
 def find_objects(detector, image, args):
     if args.sharpen:
         image = sharpen(image, args.sharpen)
     return detect_tiled(detector, image, args.overlap) if args.tile else detector.detect(image)
 
 
-def run(args, handle_image, classes=None):
+def predict_dataset(detector, dataset, files, args, threshold):
+    predictions = {}
+    for n, name in enumerate(progress(files), 1):
+        predictions[name] = find_objects(detector, load_image(dataset / "images" / name), args)
+        tqdm.write(f"[{n}/{len(files)}] {name}: {len(predictions[name].labels)} objects at {threshold}")
+    return predictions
+
+
+def process_images(args, handle_image, classes=None):
     paths = find_images(args.path)
     if not paths:
         raise SystemExit(f"entify: no images found in {args.path}")
@@ -39,10 +54,10 @@ def run(args, handle_image, classes=None):
     print(f"Loading model {args.preset}")
     detector = Detector(args.preset, args.confidence, args.overlap, args.verbose, classes)
     results = {}
-    for n, path in enumerate(paths, 1):
+    for n, path in enumerate(progress(paths), 1):
         image = load_image(path)
         results[path.name] = find_objects(detector, image, args)
-        print(f"[{n}/{len(paths)}] {path.name}: {handle_image(path, image, results[path.name])}")
+        tqdm.write(f"[{n}/{len(paths)}] {path.name}: {handle_image(path, image, results[path.name])}")
     return count_by_category(results, COCO_CLASSES)
 
 
@@ -54,7 +69,7 @@ def save_csv(counts, path):
 
 
 def detect(args):
-    counts = run(args, lambda path, image, detections: f"{len(detections.labels)} objects")
+    counts = process_images(args, lambda path, image, detections: f"{len(detections.labels)} objects")
     print()
     print(totals(counts).to_string() if not counts.empty else "No objects detected.")
     save_csv(counts, args.csv)
@@ -75,7 +90,7 @@ def highlight(args):
         found = ", ".join(f"{len(selected.labels)} {sort}" for sort, selected in groups) or "nothing found"
         return f"{found} -> {target}"
 
-    counts = run(args, save_highlight, classes)
+    counts = process_images(args, save_highlight, classes)
     save_csv(counts, args.csv)
 
 
@@ -84,10 +99,7 @@ def evaluate(args):
     thresholds = sorted(set(args.thresholds))
     print(f"Loading model {args.preset}")
     detector = Detector(args.preset, thresholds[0], args.overlap, args.verbose)
-    predictions = {}
-    for n, name in enumerate(files, 1):
-        predictions[name] = find_objects(detector, load_image(args.path / "images" / name), args)
-        print(f"[{n}/{len(files)}] {name}: {len(predictions[name].labels)} objects at {thresholds[0]}")
+    predictions = predict_dataset(detector, args.path, files, args, thresholds[0])
 
     summary, by_category, true, predicted = evaluation.evaluate(truth, predictions, thresholds, COCO_CLASSES)
     best = evaluation.best_threshold(summary)

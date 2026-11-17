@@ -2,12 +2,13 @@ import argparse
 import json
 import random
 import re
-import shutil
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
+from tqdm import tqdm
 
 API_URL = "https://commons.wikimedia.org/w/api.php"
 USER_AGENT = "entify-data-fetch/0.0.1 (open-source image counting project)"
@@ -17,6 +18,7 @@ MAX_OFFSET = 10000
 FALLBACK_WIDTH = 1920
 DOWNLOAD_PAUSE = 2
 MAX_WAIT = 30
+CHUNK_SIZE = 64 * 1024
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 DEFAULT_QUERY = 'crowd OR herd OR flock OR "parking lot" OR "traffic jam" OR "bicycle parking" OR market'
 
@@ -39,8 +41,6 @@ TITLES = [
 ]
 
 IMAGEINFO_PARAMS = {
-    "action": "query",
-    "format": "json",
     "prop": "imageinfo",
     "iiprop": "url|size|extmetadata",
     "iiurlwidth": MAX_WIDTH,
@@ -65,13 +65,13 @@ def api(params):
         return json.load(response)
 
 
-def query(params):
+def image_metadata(params):
     pages = api({**IMAGEINFO_PARAMS, **params}).get("query", {}).get("pages", {}).values()
     return {page["title"]: page.get("imageinfo", [None])[0] for page in pages}
 
 
 def fetch_titles(titles):
-    metadata = query({"titles": "|".join(titles)})
+    metadata = image_metadata({"titles": "|".join(titles)})
     return {title: metadata.get(title) for title in titles}
 
 
@@ -90,7 +90,7 @@ def fetch_random(search, count, min_width, seed):
         "gsrlimit": count,
         "gsroffset": offset,
     }
-    return query(params)
+    return image_metadata(params)
 
 
 def candidate_urls(info):
@@ -103,12 +103,16 @@ def candidate_urls(info):
     return list(dict.fromkeys(urls))
 
 
-def save(urls, target):
+def save(urls, target, label):
     partial = target.with_suffix(".part")
     for url in urls:
         try:
             with request(url) as response, open(partial, "wb") as file:
-                shutil.copyfileobj(response, file)
+                size = int(response.headers.get("Content-Length") or 0) or None
+                with tqdm(total=size, desc=label, unit="B", unit_scale=True, unit_divisor=1024, leave=False) as bar:
+                    while chunk := response.read(CHUNK_SIZE):
+                        file.write(chunk)
+                        bar.update(len(chunk))
         except urllib.error.HTTPError as error:
             print(f"  HTTP {error.code} for {url.split('?')[0]}")
             continue
@@ -120,6 +124,10 @@ def save(urls, target):
 
 def plain(html):
     return re.sub(r"<[^>]+>", "", html).strip()
+
+
+def shorten(name, length=40):
+    return name if len(name) <= length else name[:length - 3] + "..."
 
 
 def file_name(title):
@@ -160,7 +168,8 @@ def download(metadata, out_dir):
         meta = info.get("extmetadata", {})
         target = out_dir / file_name(title)
         if not target.exists():
-            saved = save(candidate_urls(info), target)
+            label = f"[{n}/{len(metadata)}] {shorten(target.name)}"
+            saved = save(candidate_urls(info), target, label)
             time.sleep(DOWNLOAD_PAUSE)
             if not saved:
                 print(f"[{n}/{len(metadata)}] skipped: {title}")

@@ -1,5 +1,6 @@
 import contextlib
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,29 @@ def model_dir():
 
 
 MODEL_DIR = model_dir()
+DOWNLOADED = ".downloaded"
+
+
+def local_preset(preset):
+    # Store built-in Kaggle presets as models/<preset>_v<version>/ instead of kagglehub's deeply nested cache.
+    # Anything else, such as a local folder or a preset KerasHub does not list, is passed on unchanged.
+    try:
+        from keras_hub.src.utils.preset_utils import BUILTIN_PRESETS
+
+        handle = BUILTIN_PRESETS[preset]["kaggle_handle"]
+    except (ImportError, KeyError, TypeError):
+        return preset
+    match = re.fullmatch(r"kaggle://(.+)/(\d+)", handle)
+    if not match:
+        return preset
+    target = MODEL_DIR / f"{preset}_v{match[2]}"
+    if not (target / DOWNLOADED).exists():
+        import kagglehub
+
+        print(f"Downloading model {preset} to {target}")
+        kagglehub.model_download(handle.removeprefix("kaggle://"), output_dir=str(target))
+        (target / DOWNLOADED).touch()
+    return str(target)
 
 COCO_CLASSES = (
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
@@ -58,8 +82,6 @@ class Detections:
 
 
 class Detector:
-    class_names = COCO_CLASSES
-
     def __init__(self, preset=DEFAULT_PRESET, confidence=0.5, overlap=0.5, verbose=False, classes=None):
         if not verbose:
             silence_library_logs()
@@ -69,7 +91,7 @@ class Detector:
 
             from entify.decoder import SelectedClassesNMS
 
-            self.model = keras_hub.models.ObjectDetector.from_preset(preset)
+            self.model = keras_hub.models.ObjectDetector.from_preset(local_preset(preset))
             config = self.model.prediction_decoder.get_config()
             config |= {"confidence_threshold": confidence, "iou_threshold": overlap}
             self.model.prediction_decoder = SelectedClassesNMS(classes=classes, **config)

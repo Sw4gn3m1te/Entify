@@ -1,6 +1,8 @@
 import numpy as np
+from tqdm import tqdm
 
 from entify.detector import Detections
+from entify.geometry import areas, intersection_areas, iou
 
 TILE_SIZE = 640
 TILE_OVERLAP = 0.2
@@ -36,17 +38,6 @@ def complete_boxes(detections, x, y, tile_shape, image_shape):
     return detections.where(keep)
 
 
-def areas(boxes):
-    return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-
-
-def iou(box, boxes):
-    widths = np.clip(np.minimum(box[2], boxes[:, 2]) - np.maximum(box[0], boxes[:, 0]), 0, None)
-    heights = np.clip(np.minimum(box[3], boxes[:, 3]) - np.maximum(box[1], boxes[:, 1]), 0, None)
-    intersection = widths * heights
-    return intersection / np.maximum(areas(box[None])[0] + areas(boxes) - intersection, 1e-9)
-
-
 def without_duplicates(detections, max_overlap):
     order = np.argsort(-detections.scores)
     keep = []
@@ -62,9 +53,7 @@ def fragments(detections, from_tiles):
     found = np.zeros(len(boxes), dtype=bool)
     for i in np.flatnonzero(from_tiles):
         larger = (detections.labels == detections.labels[i]) & (sizes > sizes[i])
-        widths = np.clip(np.minimum(boxes[i, 2], boxes[larger, 2]) - np.maximum(boxes[i, 0], boxes[larger, 0]), 0, None)
-        heights = np.clip(np.minimum(boxes[i, 3], boxes[larger, 3]) - np.maximum(boxes[i, 1], boxes[larger, 1]), 0, None)
-        contained = widths * heights / max(sizes[i], 1e-9) >= CONTAINED
+        contained = intersection_areas(boxes[i], boxes[larger]) / max(sizes[i], 1e-9) >= CONTAINED
         found[i] = np.any(contained & (sizes[i] / sizes[larger] >= MIN_FRAGMENT_SHARE))
     return found
 
@@ -73,7 +62,8 @@ def detect_tiled(detector, image, max_overlap):
     if max(image.shape[:2]) <= TILE_SIZE:
         return detector.detect(image)
     parts = [detector.detect(image)]
-    for x, y, tile in tiles(image):
+    grid = list(tiles(image))
+    for x, y, tile in tqdm(grid, desc="tiles", unit="tile", leave=False, disable=None):
         found = complete_boxes(detector.detect(tile), x, y, tile.shape, image.shape)
         parts.append(found.shifted(x, y))
     combined = Detections.concatenate(parts)

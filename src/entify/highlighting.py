@@ -5,6 +5,8 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 
+from entify.geometry import intersection_areas
+
 DIM_FACTOR = 0.35
 COLORS = (
     "#ffd400", "#00e5ff", "#ff4fd8", "#7cfc00", "#ff9f1a", "#b388ff",
@@ -24,12 +26,7 @@ def dim(image, boxes, factor=DIM_FACTOR):
 
 
 def overlap_area(rect, rects):
-    if len(rects) == 0:
-        return 0.0
-    rects = np.asarray(rects)
-    widths = np.minimum(rect[2], rects[:, 2]) - np.maximum(rect[0], rects[:, 0])
-    heights = np.minimum(rect[3], rects[:, 3]) - np.maximum(rect[1], rects[:, 1])
-    return float((np.clip(widths, 0, None) * np.clip(heights, 0, None)).sum())
+    return float(intersection_areas(rect, rects).sum())
 
 
 def candidate_positions(box, width, height, snug):
@@ -59,8 +56,7 @@ def gap_line(rect, box):
         middle = (max(a1, b1) + min(a2, b2)) / 2
         return middle, middle
 
-    (label_x, box_x), (label_y, box_y) = facing(rect[0], rect[2], box[0], box[2]), facing(rect[1], rect[3], box[1], box[3])
-    return (label_x, box_x), (label_y, box_y)
+    return facing(rect[0], rect[2], box[0], box[2]), facing(rect[1], rect[3], box[1], box[3])
 
 
 def place_label(box, size, image_size, placed_labels, other_boxes, snug):

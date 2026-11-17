@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "entify"
-version = "0.3.0"
+version = "0.4.0"
 description = "Detect, count and highlight objects in images with pretrained models"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "tensorflow",
     "keras",
@@ -19,6 +19,7 @@ dependencies = [
     "pandas",
     "matplotlib",
     "pillow",
+    "tqdm",
 ]
 
 [project.scripts]

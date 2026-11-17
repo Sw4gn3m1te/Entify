@@ -85,7 +85,7 @@ def main():
     parser.add_argument("--dense", type=int, default=30, help="images with 15 or more objects")
     parser.add_argument("--medium", type=int, default=30, help="images with 5 to 14 objects")
     parser.add_argument("--diverse", type=int, default=25, help="images chosen to cover remaining categories")
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=0, help="seed for the image selection, same seed gives the same subset (default: %(default)s)")
     parser.add_argument("--data-dir", type=Path, default=DATA_DIR)
     args = parser.parse_args()
 
