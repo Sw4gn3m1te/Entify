@@ -34,7 +34,7 @@ def run(args, dataset):
     truth, files = evaluation.load_ground_truth(dataset / "annotations.json")
     thresholds = sorted(set(args.thresholds))
     model = load_model(args.model, args.labels, thresholds[0], args.overlap)
-    predictions = predict_dataset(model, dataset, files, args, thresholds[0])
+    predictions = predict_dataset(model, dataset, files, args, thresholds)
     return truth, evaluation.evaluate(truth, predictions, thresholds, model.categories)
 
 

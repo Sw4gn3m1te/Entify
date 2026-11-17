@@ -68,11 +68,16 @@ def find_objects(model, image, args):
     return detect_tiled(model, image, args.overlap) if args.tile else model.detect(image)
 
 
-def predict_dataset(model, dataset, files, args, threshold):
+def counts_by_threshold(detections, thresholds):
+    # The model runs once at the lowest threshold; higher thresholds only filter the stored scores.
+    return ", ".join(f"{int((detections.scores >= threshold).sum())} at {threshold:.2f}" for threshold in thresholds)
+
+
+def predict_dataset(model, dataset, files, args, thresholds):
     predictions = {}
     for n, name in enumerate(progress(files), 1):
         predictions[name] = find_objects(model, load_image(dataset / "images" / name), args)
-        tqdm.write(f"[{n}/{len(files)}] {name}: {len(predictions[name].labels)} objects at {threshold}")
+        tqdm.write(f"[{n}/{len(files)}] {name}: {counts_by_threshold(predictions[name], thresholds)}")
     return predictions
 
 
@@ -127,7 +132,7 @@ def evaluate(args):
     truth, files = evaluation.load_ground_truth(args.path / "annotations.json")
     thresholds = sorted(set(args.thresholds))
     model = open_model(args, thresholds[0])
-    predictions = predict_dataset(model, args.path, files, args, thresholds[0])
+    predictions = predict_dataset(model, args.path, files, args, thresholds)
 
     summary, by_category, true, predicted = evaluation.evaluate(truth, predictions, thresholds, model.categories)
     best = evaluation.best_threshold(summary)
