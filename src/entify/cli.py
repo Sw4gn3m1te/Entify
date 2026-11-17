@@ -1,4 +1,5 @@
 import argparse
+import time
 from pathlib import Path
 
 from tqdm import tqdm
@@ -162,6 +163,99 @@ def review(args):
                not args.no_browser, args.verbose)
 
 
+def count_accuracy(model, samples, args):
+    from entify.training import ground_truth_pairs
+
+    predictions = {}
+    for sample in progress(samples):
+        predictions[sample.path.name] = find_objects(model, load_image(sample.path), args)
+    summary, *_ = evaluation.evaluate(ground_truth_pairs(samples), predictions, [args.confidence], model.categories)
+    row = summary.iloc[0]
+    return {
+        "images": len(samples), "true": int(row["true objects"]), "predicted": int(row["predicted objects"]),
+        "mae": float(row["mean absolute error per image"]),
+    }
+
+
+def finetune(args):
+    from entify import training
+
+    reviewed = training.reviewed_samples(args.path)
+    if not reviewed:
+        raise SystemExit(f"entify: no image in {args.path} is marked as 'all objects checked'")
+    model = open_model(args, args.confidence)
+    if model.kind != "boxes":
+        raise SystemExit("entify: fine-tuning is only supported for object detectors")
+
+    review_train, review_check = training.split(reviewed, args.val_split, args.seed)
+    coco_train, coco_check = [], []
+    if args.mix_coco or args.check_coco:
+        if not training.uses_coco_categories(model):
+            print("COCO images are not mixed in: the model does not use the COCO categories")
+        elif not (args.coco / "annotations.json").exists():
+            print(f"COCO images are not mixed in: {args.coco} not found (python scripts/fetch_coco_subset.py)")
+        else:
+            coco = training.coco_samples(args.coco, args.mix_coco + args.check_coco, args.seed)
+            coco_train, coco_check = coco[:args.mix_coco], coco[args.mix_coco:]
+    train = review_train + coco_train
+    print(f"Training on {len(review_train)} reviewed and {len(coco_train)} COCO images, "
+          f"checking on {len(review_check)} held-out reviewed and {len(coco_check)} COCO images")
+
+    checks = [
+        ("reviewed images, used for training", review_train),
+        ("reviewed images, held out", review_check),
+        ("COCO images, held out", coco_check),
+    ]
+    checks = [(name, samples) for name, samples in checks if samples]
+    print("\nCounting accuracy before fine-tuning")
+    before = {name: count_accuracy(model, samples, args) for name, samples in checks}
+
+    print(f"\nFine-tuning for {args.epochs} epochs")
+    started = time.perf_counter()
+    losses = training.finetune(model, train, args.epochs, args.lr, not args.unfreeze_all, args.seed)
+    minutes = (time.perf_counter() - started) / 60
+
+    out = args.out or training.next_model_dir(model.name)
+    training.save_finetuned(model, out, {
+        "base_model": model.name,
+        "training": {
+            "review": str(args.path), "reviewed_images": len(review_train), "coco_images": len(coco_train),
+            "epochs": args.epochs, "learning_rate": args.lr, "backbone_frozen": not args.unfreeze_all,
+            "seed": args.seed, "loss_per_epoch": losses,
+        },
+    })
+    print(f"\nSaved to {out}. Counting accuracy after fine-tuning (model loaded from there)")
+    tuned = load_model(out, args.labels, args.confidence, args.overlap, args.min_area, args.verbose)
+    after = {name: count_accuracy(tuned, samples, args) for name, samples in checks}
+
+    report = finetune_report(model.name, out, args, before, after, losses, minutes)
+    (Path(out) / "finetune_report.md").write_text(report, encoding="utf-8")
+    print("\n" + report)
+
+
+def finetune_report(base, out, args, before, after, losses, minutes):
+    lines = [
+        f"# Fine-tuning {Path(base).name}",
+        "",
+        f"New model: `{out}`. Use it with `-m {out}`.",
+        "",
+        f"Epochs: {args.epochs}, learning rate: {args.lr}, backbone {'trained' if args.unfreeze_all else 'frozen'}, "
+        f"seed: {args.seed}, training time: {minutes:.1f} min.",
+        f"Loss per epoch: {', '.join(f'{loss:.3f}' for loss in losses)}.",
+        "",
+        f"Counting accuracy at confidence {args.confidence}:",
+        "",
+        "| Images | Count | True objects | Predicted before | Predicted after | MAE per image before | MAE per image after |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for name in before:
+        b, a = before[name], after[name]
+        lines.append(f"| {name} | {b['images']} | {b['true']} | {b['predicted']} | {a['predicted']} "
+                     f"| {b['mae']:.2f} | {a['mae']:.2f} |")
+    lines += ["", "MAE: mean absolute counting error per image, lower is better."]
+    return "\n".join(lines) + "\n"
+
+
 def add_model_options(parser):
     parser.add_argument(
         "-m", "--model", "--preset", dest="model", default=DEFAULT_MODEL, metavar="MODEL",
@@ -263,6 +357,43 @@ def build_parser():
     review_parser.add_argument("--port", type=int, default=8765, help="local port of the web app (default: 8765)")
     review_parser.add_argument("--no-browser", action="store_true", help="do not open the browser automatically")
     review_parser.set_defaults(handler=review)
+
+    finetune_parser = commands.add_parser(
+        "finetune", parents=[model_options],
+        help="fine-tune an object detector on the corrections from entify review",
+    )
+    finetune_parser.add_argument("path", type=Path, help="review folder with annotations.json")
+    finetune_parser.add_argument(
+        "-c", "--confidence", type=fraction, default=0.5,
+        help="confidence used for the before/after counting check (default: 0.5)",
+    )
+    finetune_parser.add_argument("--epochs", type=int, default=5, help="passes over the training images (default: 5)")
+    finetune_parser.add_argument("--lr", type=float, default=1e-5, help="learning rate (default: 1e-5)")
+    finetune_parser.add_argument(
+        "--mix-coco", type=int, default=50, metavar="COUNT",
+        help="COCO images mixed into training so the model keeps its other categories (default: 50)",
+    )
+    finetune_parser.add_argument(
+        "--check-coco", type=int, default=20, metavar="COUNT",
+        help="further COCO images for the before/after check (default: 20)",
+    )
+    finetune_parser.add_argument(
+        "--coco", type=Path, default=DEFAULT_DATASET,
+        help=f"COCO-format dataset to take those images from (default: {DEFAULT_DATASET})",
+    )
+    finetune_parser.add_argument(
+        "--val-split", type=fraction, default=0.2,
+        help="share of reviewed images held out for the check (default: 0.2)",
+    )
+    finetune_parser.add_argument("--seed", type=int, default=0, help="seed for splitting and shuffling (default: 0)")
+    finetune_parser.add_argument(
+        "--unfreeze-all", action="store_true", help="also train the pretrained backbone (slower, needs more data)",
+    )
+    finetune_parser.add_argument(
+        "--out", type=Path, metavar="FOLDER",
+        help="folder for the new model (default: models/<model>_ft<N>)",
+    )
+    finetune_parser.set_defaults(handler=finetune)
     return parser
 
 

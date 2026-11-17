@@ -7,6 +7,7 @@ Give Entify a picture or a folder of pictures. It detects the objects it knows, 
 - **Detection and counting:** finds the 80 COCO categories (people, vehicles, animals, everyday objects) with a pretrained D-FINE detector and counts them per image and in total.
 - **Your own models:** works with other Keras / TensorFlow models too, e.g. one trained on your own image domain. Object detectors return boxes, segmentation models return masks, and each connected region counts as one object. See [Using your own model](#using-your-own-model).
 - **Review in the browser:** a local web app shows the detections on each image. Reject wrong ones, draw missed ones and tighten rough boxes with one click (Segment Anything). The corrections are saved as COCO annotations, ready to evaluate the model against them.
+- **Fine-tuning:** trains the detector further on the reviewed images and saves it as a new model version, with a before/after comparison of the counting accuracy.
 - **Batch mode:** processes a whole folder in one run and combines the counts in one table, optionally saved as CSV.
 - **Highlighting:** draws boxes or filled masks around the categories you choose, optionally with confidence scores and everything else dimmed. The original pixels stay untouched.
 - **Tiling:** the model sees every image at only 640 × 640 px, so small objects in large photos shrink to a few pixels and get lost. Tiling also scans the full-resolution image in overlapping 640 px tiles and merges the results, which finds people in crowds, cars in parking lots or birds in a flock that a single pass misses.
@@ -46,6 +47,7 @@ entify detect PATH [options]                                # detect and count o
 entify highlight PATH -s CATEGORY [CATEGORY ...] [options]  # mark the objects of the chosen categories
 entify evaluate [DATASET] [options]                         # compare counts with ground truth in COCO format
 entify review PATH [options]                                # check and correct detections in the browser
+entify finetune REVIEW_FOLDER [options]                     # train the detector further on the corrections
 ```
 
 `python main.py ...` and `python -m entify ...` work the same way.
@@ -116,6 +118,21 @@ Opens a local web page (http://127.0.0.1:8765) with one image at a time and the 
 The corrections go to `reviews/<name>/annotations.json` in COCO format, with absolute image paths, so the folder works directly as ground truth: `entify evaluate reviews/<name>`. Reopening the same folder continues where you left off.
 Snapping downloads the Segment Anything model (`sam_base_sa1b`, about 360 MB) on first use. On a CPU, the first snap on an image takes several seconds, every further snap on it well under a second.
 Segmentation models are reviewed as boxes.
+
+## Fine-tuning on your corrections
+
+```bash
+entify finetune reviews/photos [--epochs 5] [--lr 1e-5] [--mix-coco 50]
+```
+
+Continues training the detector on the reviewed images and saves the result as a new model, e.g. `models/dfine_small_coco_ft1/`. The original model is never changed. Use the new one with `-m models/dfine_small_coco_ft1`.
+
+- Only images marked as "all objects checked" are used. On any other image, an object nobody marked would teach the model that it is background.
+- The pretrained backbone stays frozen and the learning rate is low, so a few corrections adjust the model instead of overwriting what it knows. `--unfreeze-all` trains the backbone too.
+- `--mix-coco` mixes COCO images (from `scripts/fetch_coco_subset.py`) into the training, so the model keeps recognising the categories you did not correct. This only applies to models with the COCO categories.
+- Before and after training, Entify counts the objects on the reviewed images (part of them held out with `--val-split`) and on further COCO images (`--check-coco`). The comparison is printed and saved as `finetune_report.md` in the new model folder.
+
+Fine-tuning works for object detectors (D-FINE). On a laptop CPU, one training step takes several seconds per image, so 50 COCO plus 20 reviewed images over 5 epochs take about 45 minutes.
 
 ## Using your own model
 

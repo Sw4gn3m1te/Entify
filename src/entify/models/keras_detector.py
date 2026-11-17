@@ -15,6 +15,7 @@ class KerasDetector(EntityModel):
         self.confidence = confidence
         self.overlap = overlap
         self.input_size = tuple(task.preprocessor.image_converter.image_size)
+        self.original_decoder = task.prediction_decoder
         self.configure_decoder()
 
     def select(self, categories):
@@ -22,9 +23,14 @@ class KerasDetector(EntityModel):
         self.configure_decoder()
 
     def configure_decoder(self):
-        config = self.task.prediction_decoder.get_config()
+        config = self.original_decoder.get_config()
         config |= {"confidence_threshold": self.confidence, "iou_threshold": self.overlap}
         self.task.prediction_decoder = SelectedClassesNMS(classes=self.selected, **config)
+        self.task.predict_function = None
+
+    def restore_decoder(self):
+        # Saved presets must contain KerasHub's own decoder, which loads without Entify.
+        self.task.prediction_decoder = self.original_decoder
         self.task.predict_function = None
 
     def detect(self, image):
