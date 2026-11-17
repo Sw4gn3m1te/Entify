@@ -15,22 +15,39 @@
   </aside>
   <main>
     <header id="toolbar">
-      <label>New box category
-        <select id="category"></select>
-      </label>
+      <div class="popup" id="picker">
+        <label for="category" id="category-label">New boxes</label>
+        <input id="category" type="text" role="combobox" aria-expanded="false" aria-controls="category-list"
+               aria-autocomplete="list" autocomplete="off" spellcheck="false"
+               title="Category for new boxes, or of the selected box: type to search, ↑/↓ and Enter to pick (L)">
+        <ul id="category-list" class="menu" role="listbox" hidden></ul>
+      </div>
+      <div class="popup" id="filter">
+        <button id="filter-toggle" aria-expanded="false" aria-controls="filter-panel"
+                title="Choose which categories are shown (F)">Show: all</button>
+        <div id="filter-panel" class="menu" hidden>
+          <input id="filter-search" type="search" placeholder="Search categories" autocomplete="off" spellcheck="false">
+          <div class="row">
+            <button id="filter-all">All</button>
+            <button id="filter-none">None</button>
+          </div>
+          <ul id="filter-list"></ul>
+        </div>
+      </div>
       <button id="snap" title="Tighten the selected box with Segment Anything (S)">Snap</button>
-      <button id="reject" title="Reject or restore the selected box (Delete)">Reject</button>
+      <button id="remove" title="Delete a box you drew, reject or restore a model detection (Delete)">Delete</button>
       <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
-      <label class="check" title="Every object of every category in this image is marked (C)">
-        <input type="checkbox" id="complete"> All objects checked
+      <label class="check" id="complete-label" title="Every object of every category in this image is marked (C)">
+        <input type="checkbox" id="complete"> <span id="complete-text">All objects checked</span>
       </label>
       <button id="save" title="Save (Ctrl+S)">Save</button>
       <span id="status" role="status"></span>
     </header>
     <div id="stage"><canvas id="canvas"></canvas></div>
     <footer id="help">
-      Drag on the image: new box · click a box: select · drag a selected box or its handles: move or resize ·
-      wheel: zoom · right-drag or Space+drag: pan · ←/→: previous/next image (saves)
+      Drag: new box (also inside other boxes) · Shift+drag: always a new box · click: select ·
+      drag the selected box or its handles: move, resize · wheel: zoom · right-drag or Space+drag: pan ·
+      L: category · F: shown categories · ←/→: previous/next image (saves)
     </footer>
   </main>
   <script src="app.js"></script>

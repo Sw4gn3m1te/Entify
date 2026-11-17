@@ -69,7 +69,7 @@ entify finetune REVIEW_FOLDER [options]                     # train the detector
 | – | `--thresholds` | `evaluate` only: confidence thresholds to compare (default: `0.3 0.4 0.5 0.6 0.7 0.8`) |
 | – | `--csv` | `detect`, `highlight`: write results to a CSV file, only when given (default file: `outputs/results.csv`) |
 | – | `--out` | `highlight`: folder for the highlighted images (default: `outputs`) <br> `evaluate`: folder for tables and plots (default: `outputs/evaluation`) <br> `review`: folder for `annotations.json` (default: `reviews/<name of PATH>`) |
-| – | `--port` | `review` only: local port of the web app (default: 8765) |
+| – | `--port` | `review` only: local port of the web app (default: 8123) |
 | – | `--no-browser` | `review` only: do not open the browser automatically |
 | `-v` | `--verbose` | Show TensorFlow and KerasHub log messages |
 | `-h` | `--help` | Show the help message |
@@ -102,21 +102,24 @@ pip install -e ".[review]"
 entify review photos/ -c 0.4
 ```
 
-Opens a local web page (http://127.0.0.1:8765) with one image at a time and the model's detections as boxes.
+Opens a local web page (http://127.0.0.1:8123) with one image at a time and the model's detections as boxes.
 
 | Action | How |
 |---|---|
 | Reject a wrong detection or restore it | select the box, then `Delete` or the Reject button |
-| Add a missed object | choose the category, drag a box on the image |
-| Fix a box | drag it, or drag one of its handles |
+| Remove a box you drew | select it, then `Delete`: it is deleted outright (`Ctrl+Z` brings it back) |
+| Add a missed object | drag a box on the image, also inside other boxes; `Shift` + drag always draws, even on the selected box |
+| Choose the category of new boxes | `L` or click the category field, type to search, `↑`/`↓` and `Enter` to pick. Recently used and this image's categories come first |
+| Change a box's category | select the box, then pick another category the same way |
+| Fix a box | select it, then drag it or one of its handles |
 | Tighten a rough box | select it, then `S` or Snap: Segment Anything finds the object inside the box |
-| Change the category | select the box and pick another category |
+| Show only some categories | `F` or the Show button: tick the categories to show. Hidden boxes stay saved, nothing is detected again |
 | Mark the image as fully checked | `C` or the checkbox: every object of every category is marked |
 | Undo, save, next/previous image | `Ctrl+Z`, `Ctrl+S`, `→` / `←` (switching images saves) |
 | Zoom and pan | mouse wheel, right-drag or `Space` + drag |
 
 The corrections go to `reviews/<name>/annotations.json` in COCO format, with absolute image paths, so the folder works directly as ground truth: `entify evaluate reviews/<name>`. Reopening the same folder continues where you left off.
-Snapping downloads the Segment Anything model (`sam_base_sa1b`, about 360 MB) on first use. On a CPU, the first snap on an image takes several seconds, every further snap on it well under a second.
+Snapping downloads the Segment Anything model (`sam_base_sa1b`, about 360 MB) on first use. SAM has to encode each image once (about 10 s on a laptop CPU) before it can snap; the review app does this in the background as soon as an image is open, so snapping is usually ready by the time you need it, and every snap after that takes well under a second.
 Segmentation models are reviewed as boxes.
 
 ## Fine-tuning on your corrections

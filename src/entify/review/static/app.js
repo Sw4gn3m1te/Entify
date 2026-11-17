@@ -6,6 +6,8 @@ const COLORS = [
 ];
 const HANDLE = 6;        // handle size in screen pixels
 const MIN_BOX = 3;       // smallest new box in image pixels
+const DRAG_START = 4;    // screen pixels the mouse must move before a press counts as drawing, not as a click
+const RECENT = 6;        // recently used categories shown first in the category menu
 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
@@ -24,7 +26,30 @@ const state = {
   drag: null,
   space: false,
   busy: false,
+  category: null,       // category of new boxes
+  recent: [],           // recently picked categories, newest first
+  hidden: new Set(),    // categories whose boxes are not shown (still saved)
+  menu: { options: [], active: 0 },
 };
+
+// ---------- settings kept in the browser ----------
+
+function loadSetting(name, fallback) {
+  try {
+    const value = localStorage.getItem(`entify-review:${name}`);
+    return value === null ? fallback : JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function storeSetting(name, value) {
+  try {
+    localStorage.setItem(`entify-review:${name}`, JSON.stringify(value));
+  } catch {
+    // Private windows can block storage; the setting then lasts until the page is closed.
+  }
+}
 
 // ---------- server ----------
 
@@ -78,6 +103,9 @@ function resizeCanvas() {
 
 const currentImage = () => state.session.images[state.index];
 const colorOf = (category) => COLORS[Math.max(0, state.session.categories.indexOf(category)) % COLORS.length];
+const isVisible = (item) => !state.hidden.has(item.category);
+// Model detections keep their score through every edit; boxes drawn by hand never have one.
+const isDetection = (item) => item.score != null;
 
 function handles(box) {
   const [x1, y1, x2, y2] = box;
@@ -93,6 +121,7 @@ function draw() {
   ctx.drawImage(state.image, ox, oy, width * state.view.scale, height * state.view.scale);
 
   state.objects.forEach((item, index) => {
+    if (!isVisible(item)) return;
     const [x1, y1] = toScreen(item.box[0], item.box[1]);
     const [x2, y2] = toScreen(item.box[2], item.box[3]);
     const color = item.rejected ? "#8a8a8a" : colorOf(item.category);
@@ -121,10 +150,10 @@ function draw() {
     }
   });
 
-  if (state.drag && state.drag.kind === "new") {
+  if (state.drag && state.drag.kind === "new" && state.drag.moved) {
     const [x1, y1] = toScreen(...state.drag.start);
     const [x2, y2] = toScreen(...state.drag.current);
-    ctx.strokeStyle = colorOf(el("category").value);
+    ctx.strokeStyle = colorOf(state.category);
     ctx.setLineDash([4, 3]);
     ctx.lineWidth = 2;
     ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
@@ -153,16 +182,26 @@ function undo() {
 function updateButtons() {
   const item = state.objects[state.selected];
   el("snap").disabled = !item || item.rejected || state.busy;
-  el("reject").disabled = !item;
-  el("reject").textContent = item && item.rejected ? "Restore" : "Reject";
+  el("remove").disabled = !item;
+  el("remove").textContent = !item || !isDetection(item) ? "Delete" : item.rejected ? "Restore" : "Reject";
   el("undo").disabled = !state.undo.length;
   el("save").textContent = state.dirty ? "Save*" : "Save";
-  if (item) el("category").value = item.category;
+  if (document.activeElement !== el("category")) {
+    el("category-label").textContent = item ? "Selected box" : "New boxes";
+    el("category").value = item ? item.category : state.category;
+  }
+  updateStatusCounts();
+}
+
+function updateStatusCounts() {
+  const hidden = state.objects.filter((item) => !isVisible(item) && !item.rejected).length;
+  el("filter-toggle").classList.toggle("active", state.hidden.size > 0);
+  el("filter-toggle").title = `Choose which categories are shown (F)${hidden ? ` · ${hidden} boxes hidden here` : ""}`;
 }
 
 function hitTest(px, py) {
   const item = state.objects[state.selected];
-  if (item && !item.rejected) {
+  if (item && !item.rejected && isVisible(item)) {
     for (const [name, [hx, hy]] of Object.entries(handles(item.box))) {
       const [sx, sy] = toScreen(hx, hy);
       if (Math.abs(px - sx) <= HANDLE && Math.abs(py - sy) <= HANDLE) return { kind: "handle", index: state.selected, name };
@@ -171,6 +210,7 @@ function hitTest(px, py) {
   const [x, y] = toImage(px, py);
   let best = -1, bestArea = Infinity;
   state.objects.forEach((other, index) => {
+    if (!isVisible(other)) return;
     const [x1, y1, x2, y2] = other.box;
     const area = (x2 - x1) * (y2 - y1);
     if (x >= x1 && x <= x2 && y >= y1 && y <= y2 && area < bestArea) {
@@ -185,11 +225,17 @@ function markChanged(item) {
   if (item.source === "model") item.source = "adjusted";
 }
 
-function toggleReject() {
+function removeSelected() {
+  // A box drawn by hand is deleted outright; a model detection is marked as rejected, so it can be restored.
   const item = state.objects[state.selected];
   if (!item) return;
   remember();
-  item.rejected = !item.rejected;
+  if (isDetection(item)) {
+    item.rejected = !item.rejected;
+  } else {
+    state.objects.splice(state.selected, 1);
+    state.selected = -1;
+  }
   updateButtons();
   draw();
 }
@@ -199,13 +245,14 @@ async function snapSelected() {
   if (!item || item.rejected || state.busy) return;
   state.busy = true;
   updateButtons();
-  setStatus("Snapping… the first snap on an image takes a few seconds");
+  setStatus("Snapping…");
+  const started = performance.now();
   try {
     const result = await api(`/api/images/${state.index}/snap`, { method: "POST", body: JSON.stringify({ box: item.box }) });
     remember();
     item.box = result.box;
     item.source = "snapped";
-    setStatus("Snapped");
+    setStatus(`Snapped in ${((performance.now() - started) / 1000).toFixed(1)} s`);
   } catch (error) {
     setStatus(`Snap failed: ${error.message}`);
   } finally {
@@ -221,26 +268,21 @@ canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
 canvas.addEventListener("mousedown", (event) => {
   if (!state.image) return;
+  closeMenus();
   const [px, py] = pointer(event);
   if (event.button === 2 || event.button === 1 || state.space) {
     state.drag = { kind: "pan", from: [px, py], view: { ...state.view } };
     return;
   }
   const hit = hitTest(px, py);
-  if (hit && hit.kind === "handle") {
-    remember();
-    state.drag = { kind: "resize", index: hit.index, name: hit.name };
-  } else if (hit && hit.index === state.selected && !state.objects[hit.index].rejected) {
-    remember();
-    state.drag = { kind: "move", index: hit.index, from: toImage(px, py), box: [...state.objects[hit.index].box] };
-  } else if (hit) {
-    state.selected = hit.index;
-    updateButtons();
+  const start = toImage(px, py);
+  if (!event.shiftKey && hit && hit.kind === "handle") {
+    state.drag = { kind: "resize", index: hit.index, name: hit.name, changed: false };
+  } else if (!event.shiftKey && hit && hit.index === state.selected && !state.objects[hit.index].rejected) {
+    state.drag = { kind: "move", index: hit.index, from: start, box: [...state.objects[hit.index].box], changed: false };
   } else {
-    state.selected = -1;
-    const start = toImage(px, py);
-    state.drag = { kind: "new", start, current: start };
-    updateButtons();
+    // A press that does not move selects the box under the mouse; a drag draws a new box, also inside other boxes.
+    state.drag = { kind: "new", start, current: start, from: [px, py], moved: false, click: hit ? hit.index : -1 };
   }
   draw();
 });
@@ -255,19 +297,24 @@ window.addEventListener("mousemove", (event) => {
     state.view.y = drag.view.y + py - drag.from[1];
   } else if (drag.kind === "new") {
     drag.current = [x, y];
-  } else if (drag.kind === "move") {
+    if (Math.hypot(px - drag.from[0], py - drag.from[1]) > DRAG_START) drag.moved = true;
+  } else {
     const item = state.objects[drag.index];
-    const dx = x - drag.from[0], dy = y - drag.from[1];
-    item.box = [drag.box[0] + dx, drag.box[1] + dy, drag.box[2] + dx, drag.box[3] + dy];
-    markChanged(item);
-  } else if (drag.kind === "resize") {
-    const item = state.objects[drag.index];
-    const box = [...item.box];
-    if (drag.name.includes("w")) box[0] = x;
-    if (drag.name.includes("e")) box[2] = x;
-    if (drag.name.includes("n")) box[1] = y;
-    if (drag.name.includes("s")) box[3] = y;
-    item.box = box;
+    if (!drag.changed) {
+      remember();
+      drag.changed = true;
+    }
+    if (drag.kind === "move") {
+      const dx = x - drag.from[0], dy = y - drag.from[1];
+      item.box = [drag.box[0] + dx, drag.box[1] + dy, drag.box[2] + dx, drag.box[3] + dy];
+    } else {
+      const box = [...item.box];
+      if (drag.name.includes("w")) box[0] = x;
+      if (drag.name.includes("e")) box[2] = x;
+      if (drag.name.includes("n")) box[1] = y;
+      if (drag.name.includes("s")) box[3] = y;
+      item.box = box;
+    }
     markChanged(item);
   }
   draw();
@@ -279,10 +326,17 @@ window.addEventListener("mouseup", () => {
   if (!drag) return;
   if (drag.kind === "new") {
     const box = clampBox([...drag.start, ...drag.current]);
-    if (box[2] - box[0] >= MIN_BOX && box[3] - box[1] >= MIN_BOX) {
+    if (drag.moved && box[2] - box[0] >= MIN_BOX && box[3] - box[1] >= MIN_BOX) {
       remember();
-      state.objects.push({ box, category: el("category").value, source: "manual", score: null, rejected: false });
+      state.objects.push({ box, category: state.category, source: "manual", score: null, rejected: false });
       state.selected = state.objects.length - 1;
+      if (state.hidden.has(state.category)) {
+        state.hidden.delete(state.category);
+        saveHidden();
+        renderFilter();
+      }
+    } else if (!drag.moved) {
+      state.selected = drag.click;
     }
   } else if (drag.kind === "move" || drag.kind === "resize") {
     const item = state.objects[drag.index];
@@ -302,20 +356,245 @@ canvas.addEventListener("wheel", (event) => {
   draw();
 }, { passive: false });
 
+// ---------- category menu ----------
+
+function categoryOptions(query) {
+  const all = state.session.categories;
+  const text = query.trim().toLowerCase();
+  if (text) {
+    const matches = all.filter((name) => name.toLowerCase().includes(text));
+    const starts = (name) => name.toLowerCase().startsWith(text) || name.toLowerCase().includes(` ${text}`);
+    matches.sort((a, b) => starts(b) - starts(a) || a.localeCompare(b));
+    return matches.map((name) => ({ name }));
+  }
+  const recent = state.recent.filter((name) => all.includes(name));
+  const inImage = [...new Set(state.objects.map((item) => item.category))].filter((name) => !recent.includes(name)).sort();
+  const rest = [...all].sort().filter((name) => !recent.includes(name) && !inImage.includes(name));
+  return [
+    ...recent.map((name) => ({ name, group: "Recent" })),
+    ...inImage.map((name) => ({ name, group: "In this image" })),
+    ...rest.map((name) => ({ name, group: "All categories" })),
+  ];
+}
+
+function renderCategoryMenu() {
+  const list = el("category-list");
+  const counts = categoryCounts();
+  list.innerHTML = "";
+  let group = null;
+  state.menu.options.forEach((option, index) => {
+    if (option.group && option.group !== group) {
+      group = option.group;
+      const heading = document.createElement("li");
+      heading.className = "group";
+      heading.textContent = group;
+      list.appendChild(heading);
+    }
+    const item = document.createElement("li");
+    item.setAttribute("role", "option");
+    item.id = `category-option-${index}`;
+    item.className = index === state.menu.active ? "active" : "";
+    item.setAttribute("aria-selected", index === state.menu.active);
+    item.innerHTML = `<span class="swatch" style="background:${colorOf(option.name)}"></span>`;
+    item.append(option.name);
+    if (counts[option.name]) {
+      const count = document.createElement("span");
+      count.className = "count";
+      count.textContent = counts[option.name];
+      item.appendChild(count);
+    }
+    item.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      chooseCategory(option.name);
+    });
+    list.appendChild(item);
+  });
+  if (!state.menu.options.length) {
+    const empty = document.createElement("li");
+    empty.className = "group";
+    empty.textContent = "No matching category";
+    list.appendChild(empty);
+  }
+  const active = el(`category-option-${state.menu.active}`);
+  if (active) active.scrollIntoView({ block: "nearest" });
+  el("category").setAttribute("aria-activedescendant", active ? active.id : "");
+}
+
+function openCategoryMenu() {
+  closeFilter();
+  const input = el("category");
+  const item = state.objects[state.selected];
+  input.placeholder = item ? item.category : state.category;
+  input.value = "";
+  state.menu = { options: categoryOptions(""), active: 0 };
+  el("category-list").hidden = false;
+  input.setAttribute("aria-expanded", "true");
+  renderCategoryMenu();
+}
+
+function closeCategoryMenu() {
+  el("category-list").hidden = true;
+  el("category").setAttribute("aria-expanded", "false");
+  el("category").placeholder = "";
+  updateButtons();
+}
+
+function chooseCategory(name) {
+  state.recent = [name, ...state.recent.filter((other) => other !== name)].slice(0, RECENT);
+  storeSetting("recent", state.recent);
+  if (state.hidden.has(name)) {
+    state.hidden.delete(name);
+    saveHidden();
+  }
+  const item = state.objects[state.selected];
+  if (item) {
+    if (item.category !== name) {
+      remember();
+      item.category = name;
+      markChanged(item);
+    }
+  } else {
+    state.category = name;
+  }
+  el("category").blur();
+  renderFilter();
+  draw();
+}
+
+el("category").addEventListener("focus", openCategoryMenu);
+el("category").addEventListener("blur", closeCategoryMenu);
+el("category").addEventListener("input", () => {
+  state.menu = { options: categoryOptions(el("category").value), active: 0 };
+  renderCategoryMenu();
+});
+el("category").addEventListener("keydown", (event) => {
+  const count = state.menu.options.length;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    if (count) state.menu.active = (state.menu.active + (event.key === "ArrowDown" ? 1 : count - 1)) % count;
+    renderCategoryMenu();
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    const option = state.menu.options[state.menu.active];
+    if (option) chooseCategory(option.name);
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    el("category").blur();
+  }
+});
+
+// ---------- shown categories ----------
+
+function categoryCounts() {
+  const counts = {};
+  for (const item of state.objects) if (!item.rejected) counts[item.category] = (counts[item.category] || 0) + 1;
+  return counts;
+}
+
+function saveHidden() {
+  storeSetting(`hidden:${state.session.output}`, [...state.hidden]);
+  const item = state.objects[state.selected];
+  if (item && !isVisible(item)) state.selected = -1;
+  updateButtons();
+}
+
+function renderFilter() {
+  const all = state.session.categories;
+  const shown = all.filter((name) => !state.hidden.has(name));
+  el("filter-toggle").textContent = `Show: ${shown.length === all.length ? "all"
+    : shown.length === 0 ? "none" : shown.length === 1 ? shown[0] : `${shown.length} of ${all.length}`}`;
+  if (el("filter-panel").hidden) return;
+
+  const counts = categoryCounts();
+  const text = el("filter-search").value.trim().toLowerCase();
+  const names = all.filter((name) => name.toLowerCase().includes(text))
+    .sort((a, b) => !!counts[b] - !!counts[a] || a.localeCompare(b));
+  const list = el("filter-list");
+  list.innerHTML = "";
+  for (const name of names) {
+    const item = document.createElement("li");
+    const label = document.createElement("label");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = !state.hidden.has(name);
+    box.addEventListener("change", () => {
+      if (box.checked) state.hidden.delete(name);
+      else state.hidden.add(name);
+      saveHidden();
+      renderFilter();
+      draw();
+    });
+    label.append(box);
+    label.insertAdjacentHTML("beforeend", `<span class="swatch" style="background:${colorOf(name)}"></span>`);
+    label.append(name);
+    if (counts[name]) {
+      const count = document.createElement("span");
+      count.className = "count";
+      count.textContent = counts[name];
+      label.appendChild(count);
+    }
+    item.appendChild(label);
+    list.appendChild(item);
+  }
+}
+
+function setShown(names) {
+  state.hidden = new Set(state.session.categories.filter((name) => !names.includes(name)));
+  saveHidden();
+  renderFilter();
+  draw();
+}
+
+function openFilter() {
+  el("filter-panel").hidden = false;
+  el("filter-toggle").setAttribute("aria-expanded", "true");
+  el("filter-search").value = "";
+  renderFilter();
+  el("filter-search").focus();
+}
+
+function closeFilter() {
+  el("filter-panel").hidden = true;
+  el("filter-toggle").setAttribute("aria-expanded", "false");
+}
+
+function closeMenus() {
+  closeFilter();
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+}
+
+el("filter-toggle").addEventListener("click", () => (el("filter-panel").hidden ? openFilter() : closeFilter()));
+el("filter-search").addEventListener("input", renderFilter);
+el("filter-search").addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeFilter();
+    el("filter-search").blur();
+  }
+});
+el("filter-all").addEventListener("click", () => setShown(state.session.categories));
+el("filter-none").addEventListener("click", () => setShown([]));
+document.addEventListener("mousedown", (event) => {
+  if (!el("filter").contains(event.target)) closeFilter();
+});
+
 // ---------- keyboard ----------
 
 window.addEventListener("keydown", (event) => {
-  if (event.target.tagName === "SELECT") return;
+  const target = event.target;
+  if (target.tagName === "INPUT" && target.type !== "checkbox") return;
   const key = event.key;
   if (key === " ") { state.space = true; event.preventDefault(); return; }
   if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === "z") { event.preventDefault(); undo(); return; }
   if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === "s") { event.preventDefault(); save(); return; }
-  if (key === "Delete" || key === "Backspace" || key.toLowerCase() === "x") toggleReject();
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (key === "Delete" || key === "Backspace" || key.toLowerCase() === "x") removeSelected();
   else if (key.toLowerCase() === "s") snapSelected();
   else if (key.toLowerCase() === "c") { el("complete").checked = !el("complete").checked; setComplete(); }
+  else if (key.toLowerCase() === "l" || key === "/") { event.preventDefault(); el("category").focus(); }
+  else if (key.toLowerCase() === "f") { event.preventDefault(); el("filter-panel").hidden ? openFilter() : closeFilter(); }
   else if (key === "ArrowRight" || key.toLowerCase() === "d") openImage(state.index + 1);
   else if (key === "ArrowLeft" || key.toLowerCase() === "a") openImage(state.index - 1);
-  else if (key === "Escape") { state.selected = -1; updateButtons(); draw(); }
+  else if (key === "Escape") { closeFilter(); state.selected = -1; updateButtons(); draw(); }
 });
 
 window.addEventListener("keyup", (event) => {
@@ -324,18 +603,8 @@ window.addEventListener("keyup", (event) => {
 
 // ---------- toolbar ----------
 
-el("category").addEventListener("change", () => {
-  const item = state.objects[state.selected];
-  if (item && item.category !== el("category").value) {
-    remember();
-    item.category = el("category").value;
-    markChanged(item);
-    draw();
-  }
-  el("category").blur();
-});
 el("snap").addEventListener("click", snapSelected);
-el("reject").addEventListener("click", toggleReject);
+el("remove").addEventListener("click", removeSelected);
 el("undo").addEventListener("click", undo);
 el("save").addEventListener("click", save);
 el("complete").addEventListener("change", setComplete);
@@ -416,8 +685,10 @@ async function openImage(index) {
   el("complete").checked = state.complete;
   fitView();
   const found = annotations.saved ? "saved review" : "model proposals";
-  setStatus(`${state.objects.length} objects (${found})`);
+  const hidden = state.objects.filter((item) => !isVisible(item)).length;
+  setStatus(`${state.objects.length} objects (${found})${hidden ? `, ${hidden} hidden` : ""}`);
   updateButtons();
+  renderFilter();
   draw();
 }
 
@@ -430,10 +701,12 @@ window.addEventListener("beforeunload", (event) => {
 
 async function init() {
   state.session = await api("/api/session");
+  const categories = state.session.categories;
   el("model").textContent = `Model: ${state.session.model}`;
-  el("category").innerHTML = state.session.categories
-    .map((name) => `<option value="${name}">${name}</option>`)
-    .join("");
+  state.recent = loadSetting("recent", []).filter((name) => categories.includes(name));
+  state.category = state.recent[0] || categories[0];
+  state.hidden = new Set(loadSetting(`hidden:${state.session.output}`, []).filter((name) => categories.includes(name)));
+  renderFilter();
   window.addEventListener("resize", resizeCanvas);
   resizeCanvas();
   if (state.session.images.length) await openImage(0);

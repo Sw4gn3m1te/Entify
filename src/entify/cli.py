@@ -354,7 +354,7 @@ def build_parser():
         "--out", type=Path, metavar="FOLDER",
         help=f"folder for annotations.json (default: {DEFAULT_REVIEW_DIR}/<name of PATH>)",
     )
-    review_parser.add_argument("--port", type=int, default=8765, help="local port of the web app (default: 8765)")
+    review_parser.add_argument("--port", type=int, default=8123, help="local port of the web app (default: 8123)")
     review_parser.add_argument("--no-browser", action="store_true", help="do not open the browser automatically")
     review_parser.set_defaults(handler=review)
 

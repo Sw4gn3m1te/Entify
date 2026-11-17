@@ -57,7 +57,7 @@ main { display: grid; grid-template-rows: auto 1fr auto; min-width: 0; }
   border-bottom: 1px solid var(--line);
 }
 
-select, button {
+input, button {
   font: inherit;
   color: var(--text);
   background: #2b2e34;
@@ -65,7 +65,9 @@ select, button {
   border-radius: 4px;
   padding: 4px 10px;
 }
+input[type="checkbox"] { padding: 0; }
 button:hover { border-color: var(--muted); }
+button.active { border-color: var(--accent); color: var(--accent); }
 button:disabled { opacity: 0.4; }
 label { display: inline-flex; gap: 6px; align-items: center; }
 #status { color: var(--muted); margin-left: auto; }
@@ -79,3 +81,39 @@ label { display: inline-flex; gap: 6px; align-items: center; }
   font-size: 12px;
   border-top: 1px solid var(--line);
 }
+
+/* category menu and shown-categories panel */
+.popup { position: relative; display: inline-flex; gap: 6px; align-items: center; }
+#category { width: 170px; }
+#category::placeholder { color: var(--muted); }
+#category-label { min-width: 80px; color: var(--muted); }
+.menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 10;
+  min-width: 240px;
+  max-height: 60vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+}
+.menu[hidden] { display: none; }
+.menu li { display: flex; gap: 8px; align-items: center; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+.menu li.group { cursor: default; color: var(--muted); font-size: 12px; padding-top: 8px; }
+.menu li.active, .menu li:not(.group):hover { background: #3a3d45; }
+.swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.count { margin-left: auto; color: var(--muted); font-size: 12px; }
+
+#filter-panel { padding: 8px; max-height: none; overflow: visible; }
+#filter-search { width: 100%; }
+#filter-panel .row { display: flex; gap: 6px; margin: 6px 0; }
+#filter-list { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+#filter-list li { padding: 0; }
+#filter-list label { display: flex; width: 100%; padding: 3px 6px; gap: 8px; cursor: pointer; border-radius: 4px; }
+#filter-list label:hover { background: #3a3d45; }
