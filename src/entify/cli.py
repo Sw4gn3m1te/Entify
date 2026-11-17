@@ -16,6 +16,7 @@ DEFAULT_CSV = Path("outputs/results.csv")
 DEFAULT_OUT = Path("outputs")
 DEFAULT_DATASET = Path("data/coco_subset")
 DEFAULT_EVALUATION_OUT = Path("outputs/evaluation")
+DEFAULT_REVIEW_DIR = Path("reviews")
 DEFAULT_THRESHOLDS = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
 DEFAULT_MIN_AREA = None
 ALL_SORTS = "*"
@@ -149,6 +150,18 @@ def evaluate(args):
     print(f"\nResults written to {args.out}")
 
 
+def review(args):
+    try:
+        from entify.review.server import run_review
+    except ImportError:
+        raise SystemExit('entify: the review app needs extra packages: pip install -e ".[review]"')
+    paths = image_paths(args)
+    model = open_model(args, args.confidence)
+    out = args.out or DEFAULT_REVIEW_DIR / (args.path.stem if args.path.is_file() else args.path.resolve().name)
+    run_review(paths, model, lambda model, image: find_objects(model, image, args), out, args.port,
+               not args.no_browser, args.verbose)
+
+
 def add_model_options(parser):
     parser.add_argument(
         "-m", "--model", "--preset", dest="model", default=DEFAULT_MODEL, metavar="MODEL",
@@ -191,19 +204,21 @@ def build_parser():
         "-c", "--confidence", type=fraction, default=0.5,
         help="minimum confidence score of a detection (default: 0.5)",
     )
-    input_options.add_argument(
+
+    csv_options = argparse.ArgumentParser(add_help=False)
+    csv_options.add_argument(
         "--csv", type=Path, nargs="?", const=DEFAULT_CSV, metavar="FILE",
         help=f"write counts per image and category to a CSV file (default file: {DEFAULT_CSV})",
     )
 
     detect_parser = commands.add_parser(
-        "detect", parents=[input_options, model_options],
+        "detect", parents=[input_options, csv_options, model_options],
         help="detect and count objects in an image or a folder of images",
     )
     detect_parser.set_defaults(handler=detect)
 
     highlight_parser = commands.add_parser(
-        "highlight", parents=[input_options, model_options],
+        "highlight", parents=[input_options, csv_options, model_options],
         help="mark all objects of the chosen categories",
     )
     highlight_parser.add_argument(
@@ -236,6 +251,18 @@ def build_parser():
         help=f"folder for tables and plots (default: {DEFAULT_EVALUATION_OUT})",
     )
     evaluate_parser.set_defaults(handler=evaluate)
+
+    review_parser = commands.add_parser(
+        "review", parents=[input_options, model_options],
+        help="check and correct the detections in a browser, saved as COCO annotations",
+    )
+    review_parser.add_argument(
+        "--out", type=Path, metavar="FOLDER",
+        help=f"folder for annotations.json (default: {DEFAULT_REVIEW_DIR}/<name of PATH>)",
+    )
+    review_parser.add_argument("--port", type=int, default=8765, help="local port of the web app (default: 8765)")
+    review_parser.add_argument("--no-browser", action="store_true", help="do not open the browser automatically")
+    review_parser.set_defaults(handler=review)
     return parser
 
 

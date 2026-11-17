@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "entify"
-version = "0.4.2"
+version = "0.4.3"
 description = "Detect, count and highlight objects in images with pretrained models"
 readme = "README.md"
 license = "MIT"
@@ -22,8 +22,14 @@ dependencies = [
     "tqdm",
 ]
 
+[project.optional-dependencies]
+review = ["fastapi", "uvicorn"]
+
 [project.scripts]
 entify = "entify.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+entify = ["review/static/*"]

@@ -6,6 +6,7 @@ Give Entify a picture or a folder of pictures. It detects the objects it knows, 
 ### Features
 - **Detection and counting:** finds the 80 COCO categories (people, vehicles, animals, everyday objects) with a pretrained D-FINE detector and counts them per image and in total.
 - **Your own models:** works with other Keras / TensorFlow models too, e.g. one trained on your own image domain. Object detectors return boxes, segmentation models return masks, and each connected region counts as one object. See [Using your own model](#using-your-own-model).
+- **Review in the browser:** a local web app shows the detections on each image. Reject wrong ones, draw missed ones and tighten rough boxes with one click (Segment Anything). The corrections are saved as COCO annotations, ready to evaluate the model against them.
 - **Batch mode:** processes a whole folder in one run and combines the counts in one table, optionally saved as CSV.
 - **Highlighting:** draws boxes or filled masks around the categories you choose, optionally with confidence scores and everything else dimmed. The original pixels stay untouched.
 - **Tiling:** the model sees every image at only 640 × 640 px, so small objects in large photos shrink to a few pixels and get lost. Tiling also scans the full-resolution image in overlapping 640 px tiles and merges the results, which finds people in crowds, cars in parking lots or birds in a flock that a single pass misses.
@@ -14,7 +15,7 @@ Give Entify a picture or a folder of pictures. It detects the objects it knows, 
 - **Benchmark and test data:** scripts that fetch a reproducible COCO subset and large Wikimedia Commons photos, with author and licence recorded for every image.
 
 ## Tech stack
-Python, TensorFlow / Keras (KerasHub: pretrained D-FINE detector, DeepLabV3 segmenter), NumPy, SciPy, Pandas, Matplotlib, Pillow.
+Python, TensorFlow / Keras (KerasHub: pretrained D-FINE detector, DeepLabV3 segmenter, Segment Anything), NumPy, SciPy, Pandas, Matplotlib, Pillow. Review app: FastAPI and plain JavaScript.
 
 ## Setup
 
@@ -29,7 +30,7 @@ git clone https://github.com/Sw4gn3m1te/Entify.git
 cd Entify
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -e .
+pip install -e .                 # or pip install -e ".[review]" for the review web app
 ```
 
 Check the installation with `entify --version`.
@@ -44,6 +45,7 @@ Each preset chosen with `--model` gets its own folder. Delete a folder to downlo
 entify detect PATH [options]                                # detect and count objects
 entify highlight PATH -s CATEGORY [CATEGORY ...] [options]  # mark the objects of the chosen categories
 entify evaluate [DATASET] [options]                         # compare counts with ground truth in COCO format
+entify review PATH [options]                                # check and correct detections in the browser
 ```
 
 `python main.py ...` and `python -m entify ...` work the same way.
@@ -64,7 +66,9 @@ entify evaluate [DATASET] [options]                         # compare counts wit
 | – | `--dim` | `highlight` only: darken everything outside the objects |
 | – | `--thresholds` | `evaluate` only: confidence thresholds to compare (default: `0.3 0.4 0.5 0.6 0.7 0.8`) |
 | – | `--csv` | `detect`, `highlight`: write results to a CSV file, only when given (default file: `outputs/results.csv`) |
-| – | `--out` | `highlight`: folder for the highlighted images (default: `outputs`) <br> `evaluate`: folder for tables and plots (default: `outputs/evaluation`) |
+| – | `--out` | `highlight`: folder for the highlighted images (default: `outputs`) <br> `evaluate`: folder for tables and plots (default: `outputs/evaluation`) <br> `review`: folder for `annotations.json` (default: `reviews/<name of PATH>`) |
+| – | `--port` | `review` only: local port of the web app (default: 8765) |
+| – | `--no-browser` | `review` only: do not open the browser automatically |
 | `-v` | `--verbose` | Show TensorFlow and KerasHub log messages |
 | `-h` | `--help` | Show the help message |
 | – | `--version` | Show the version |
@@ -88,6 +92,30 @@ entify highlight photos/ -s '*' --dim
 entify highlight photos/ -m deeplab_v3_plus_resnet50_pascalvoc -s person
 entify evaluate --thresholds 0.4 0.5 0.6
 ```
+
+## Reviewing detections
+
+```bash
+pip install -e ".[review]"
+entify review photos/ -c 0.4
+```
+
+Opens a local web page (http://127.0.0.1:8765) with one image at a time and the model's detections as boxes.
+
+| Action | How |
+|---|---|
+| Reject a wrong detection or restore it | select the box, then `Delete` or the Reject button |
+| Add a missed object | choose the category, drag a box on the image |
+| Fix a box | drag it, or drag one of its handles |
+| Tighten a rough box | select it, then `S` or Snap: Segment Anything finds the object inside the box |
+| Change the category | select the box and pick another category |
+| Mark the image as fully checked | `C` or the checkbox: every object of every category is marked |
+| Undo, save, next/previous image | `Ctrl+Z`, `Ctrl+S`, `→` / `←` (switching images saves) |
+| Zoom and pan | mouse wheel, right-drag or `Space` + drag |
+
+The corrections go to `reviews/<name>/annotations.json` in COCO format, with absolute image paths, so the folder works directly as ground truth: `entify evaluate reviews/<name>`. Reopening the same folder continues where you left off.
+Snapping downloads the Segment Anything model (`sam_base_sa1b`, about 360 MB) on first use. On a CPU, the first snap on an image takes several seconds, every further snap on it well under a second.
+Segmentation models are reviewed as boxes.
 
 ## Using your own model
 

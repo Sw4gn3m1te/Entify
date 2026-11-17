@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Entify review</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside id="sidebar">
+    <h1>Entify review</h1>
+    <p id="model"></p>
+    <p id="progress"></p>
+    <ol id="images"></ol>
+  </aside>
+  <main>
+    <header id="toolbar">
+      <label>New box category
+        <select id="category"></select>
+      </label>
+      <button id="snap" title="Tighten the selected box with Segment Anything (S)">Snap</button>
+      <button id="reject" title="Reject or restore the selected box (Delete)">Reject</button>
+      <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
+      <label class="check" title="Every object of every category in this image is marked (C)">
+        <input type="checkbox" id="complete"> All objects checked
+      </label>
+      <button id="save" title="Save (Ctrl+S)">Save</button>
+      <span id="status" role="status"></span>
+    </header>
+    <div id="stage"><canvas id="canvas"></canvas></div>
+    <footer id="help">
+      Drag on the image: new box · click a box: select · drag a selected box or its handles: move or resize ·
+      wheel: zoom · right-drag or Space+drag: pan · ←/→: previous/next image (saves)
+    </footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
