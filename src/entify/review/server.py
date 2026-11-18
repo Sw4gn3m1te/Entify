@@ -74,13 +74,13 @@ class Preparer:
                 print(f"Preparing in the background failed: {error}")
 
 
-def create_app(paths, model, find_objects, store, snapper, prepare=True, scope=None):
+def create_app(paths, model, find_objects, store, snapper, scope=None):
     """The review app. scope: categories this review checks (entify review -s), None for all categories."""
     app = FastAPI(title="Entify review")
     model_lock = threading.Lock()
     proposals = {}
     sizes = {index: image_size(path) for index, path in enumerate(paths)}
-    preparer = Preparer() if prepare else None
+    preparer = Preparer()
 
     def image_path(image_id):
         if not 0 <= image_id < len(paths):
@@ -119,15 +119,13 @@ def create_app(paths, model, find_objects, store, snapper, prepare=True, scope=N
         # While an image is open, encode it for snapping and detect the next one. The next image is not encoded in
         # advance: two encodings at once would slow down the snaps on the open image several times over.
         snapper.focus(str(paths[image_id]))
-        if preparer is None:
-            return
         tasks = [lambda: encode(image_id)]
         following = image_id + 1
         if following < len(paths) and store.get(paths[following]) is None:
             tasks.append(lambda: detect(following))
         preparer.want(tasks)
 
-    if preparer is not None and paths:
+    if paths:
         # The detector's first call takes several seconds longer than the others, so it runs on the first image that
         # has no saved review yet, then SAM is loaded, before the browser asks for anything.
         unsaved = next((index for index, path in enumerate(paths) if store.get(path) is None), None)
@@ -137,7 +135,6 @@ def create_app(paths, model, find_objects, store, snapper, prepare=True, scope=N
     def session():
         return {
             "model": model.name,
-            "kind": model.kind,
             "categories": list(model.selectable_categories),
             "scope": scope,
             "output": str(store.path),

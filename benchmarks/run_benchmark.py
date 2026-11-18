@@ -6,7 +6,7 @@ from datetime import date
 from pathlib import Path
 
 from entify import __version__, evaluation
-from entify.cli import DEFAULT_THRESHOLDS, fraction, predict_dataset
+from entify.cli import DEFAULT_THRESHOLDS, add_model_options, fraction, predict_dataset
 from entify.models import DEFAULT_MODEL, load_model
 
 BENCHMARK_DIR = Path(__file__).resolve().parent
@@ -32,10 +32,9 @@ def fetch_subset(seed):
 
 def run(args, dataset):
     truth, files = evaluation.load_ground_truth(dataset / "annotations.json")
-    thresholds = sorted(set(args.thresholds))
-    model = load_model(args.model, args.labels, thresholds[0], args.overlap)
-    predictions = predict_dataset(model, dataset, files, args, thresholds)
-    return truth, evaluation.evaluate(truth, predictions, thresholds, model.categories)
+    model = load_model(args.model, args.labels, args.thresholds[0], args.overlap, args.min_area, args.verbose)
+    predictions = predict_dataset(model, dataset, files, args, args.thresholds)
+    return truth, evaluation.evaluate(truth, predictions, args.thresholds, model.categories)
 
 
 def write_results(args, truth, results, runtime):
@@ -100,8 +99,8 @@ def reproduce_arguments(args):
         parts.append("--tile")
     if args.sharpen:
         parts.append(f"--sharpen {args.sharpen}")
-    if sorted(set(args.thresholds)) != DEFAULT_THRESHOLDS:
-        parts.append("--thresholds " + " ".join(map(str, sorted(set(args.thresholds)))))
+    if args.thresholds != DEFAULT_THRESHOLDS:
+        parts.append("--thresholds " + " ".join(map(str, args.thresholds)))
     return " ".join(parts)
 
 
@@ -109,12 +108,9 @@ def main():
     parser = argparse.ArgumentParser(description="Benchmark Entify's counting accuracy on a COCO val2017 subset.")
     parser.add_argument("--seed", type=int, default=0, help="seed for choosing the COCO subset (default: 0)")
     parser.add_argument("--thresholds", type=fraction, nargs="+", default=DEFAULT_THRESHOLDS, metavar="VALUE")
-    parser.add_argument("-m", "--model", "--preset", dest="model", default=DEFAULT_MODEL)
-    parser.add_argument("--labels", type=Path, metavar="FILE")
-    parser.add_argument("-o", "--overlap", type=fraction, default=0.5)
-    parser.add_argument("-t", "--tile", action="store_true")
-    parser.add_argument("--sharpen", type=float, nargs="?", const=1.0, metavar="AMOUNT")
+    add_model_options(parser)
     args = parser.parse_args()
+    args.thresholds = sorted(set(args.thresholds))
 
     dataset = fetch_subset(args.seed)
     start = time.perf_counter()

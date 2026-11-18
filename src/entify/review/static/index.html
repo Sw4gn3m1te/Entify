@@ -15,7 +15,7 @@
   </aside>
   <main>
     <header id="toolbar">
-      <div class="popup" id="picker">
+      <div class="popup">
         <label for="category" id="category-label">New boxes</label>
         <input id="category" type="text" role="combobox" aria-expanded="false" aria-controls="category-list"
                aria-autocomplete="list" autocomplete="off" spellcheck="false"
@@ -37,7 +37,7 @@
       <button id="snap" title="Tighten the selected box with Segment Anything (S)">Snap</button>
       <button id="remove" title="Delete a box you drew, reject or restore a model detection (Delete)">Delete</button>
       <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
-      <label class="check" id="complete-label" title="Every object of every category in this image is marked (C)">
+      <label id="complete-label" title="Every object of every category in this image is marked (C)">
         <input type="checkbox" id="complete"> <span id="complete-text">All objects checked</span>
       </label>
       <button id="save" title="Save (Ctrl+S)">Save</button>

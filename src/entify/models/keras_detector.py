@@ -7,8 +7,6 @@ from entify.models.nms import SelectedClassesNMS
 class KerasDetector(EntityModel):
     """A KerasHub ObjectDetector (for example D-FINE) that returns boxes."""
 
-    kind = "boxes"
-
     def __init__(self, name, task, categories, confidence=0.5, overlap=0.5):
         super().__init__(name, categories)
         self.task = task

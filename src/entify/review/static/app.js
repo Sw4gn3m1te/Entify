@@ -330,11 +330,7 @@ window.addEventListener("mouseup", () => {
       remember();
       state.objects.push({ box, category: state.category, source: "manual", score: null, rejected: false });
       state.selected = state.objects.length - 1;
-      if (state.hidden.has(state.category)) {
-        state.hidden.delete(state.category);
-        saveHidden();
-        renderFilter();
-      }
+      showCategory(state.category);
     } else if (!drag.moved) {
       state.selected = drag.click;
     }
@@ -398,14 +394,7 @@ function renderCategoryMenu() {
     item.id = `category-option-${index}`;
     item.className = index === state.menu.active ? "active" : "";
     item.setAttribute("aria-selected", index === state.menu.active);
-    item.innerHTML = `<span class="swatch" style="background:${colorOf(option.name)}"></span>`;
-    item.append(option.name);
-    if (counts[option.name]) {
-      const count = document.createElement("span");
-      count.className = "count";
-      count.textContent = counts[option.name];
-      item.appendChild(count);
-    }
+    appendCategory(item, option.name, counts[option.name]);
     item.addEventListener("mousedown", (event) => {
       event.preventDefault();
       chooseCategory(option.name);
@@ -445,10 +434,7 @@ function closeCategoryMenu() {
 function chooseCategory(name) {
   state.recent = [name, ...state.recent.filter((other) => other !== name)].slice(0, RECENT);
   storeSetting("recent", state.recent);
-  if (state.hidden.has(name)) {
-    state.hidden.delete(name);
-    saveHidden();
-  }
+  showCategory(name);
   const item = state.objects[state.selected];
   if (item) {
     if (item.category !== name) {
@@ -496,11 +482,25 @@ function categoryCounts() {
 
 const hiddenKey = () => `hidden:${state.session.output}:${(state.session.scope || ["*"]).join(",")}`;
 
-function saveHidden() {
+// Call after every change of state.hidden: stores it, deselects a box that is now hidden and redraws.
+function applyHidden() {
   storeSetting(hiddenKey(), [...state.hidden]);
   const item = state.objects[state.selected];
   if (item && !isVisible(item)) state.selected = -1;
   updateButtons();
+  renderFilter();
+  draw();
+}
+
+function showCategory(name) {
+  if (state.hidden.delete(name)) applyHidden();
+}
+
+// Colour swatch, category name and the number of its boxes in this image, if any.
+function appendCategory(parent, name, count) {
+  parent.insertAdjacentHTML("beforeend", `<span class="swatch" style="background:${colorOf(name)}"></span>`);
+  parent.append(name);
+  if (count) parent.insertAdjacentHTML("beforeend", `<span class="count">${count}</span>`);
 }
 
 function renderFilter() {
@@ -523,21 +523,11 @@ function renderFilter() {
     box.type = "checkbox";
     box.checked = !state.hidden.has(name);
     box.addEventListener("change", () => {
-      if (box.checked) state.hidden.delete(name);
-      else state.hidden.add(name);
-      saveHidden();
-      renderFilter();
-      draw();
+      state.hidden[box.checked ? "delete" : "add"](name);
+      applyHidden();
     });
     label.append(box);
-    label.insertAdjacentHTML("beforeend", `<span class="swatch" style="background:${colorOf(name)}"></span>`);
-    label.append(name);
-    if (counts[name]) {
-      const count = document.createElement("span");
-      count.className = "count";
-      count.textContent = counts[name];
-      label.appendChild(count);
-    }
+    appendCategory(label, name, counts[name]);
     item.appendChild(label);
     list.appendChild(item);
   }
@@ -545,9 +535,7 @@ function renderFilter() {
 
 function setShown(names) {
   state.hidden = new Set(state.session.categories.filter((name) => !names.includes(name)));
-  saveHidden();
-  renderFilter();
-  draw();
+  applyHidden();
 }
 
 function openFilter() {

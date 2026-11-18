@@ -1,14 +1,12 @@
 import json
 import random
 import re
-import time
 from datetime import date
 from pathlib import Path
 
 import numpy as np
 from tqdm import tqdm
 
-from entify.evaluation import load_ground_truth
 from entify.images import load_image
 from entify.models.base import resize
 from entify.models.labels import COCO_CLASSES
@@ -22,14 +20,25 @@ class Sample:
     checked: the categories whose objects were all checked by a person, None if all of them were.
     """
 
-    def __init__(self, path, objects, source, checked=None):
+    def __init__(self, path, objects, checked=None):
         self.path = Path(path)
         self.objects = objects
-        self.source = source
         self.checked = None if checked is None else frozenset(checked)
 
     def counts(self, category):
         return self.checked is None or category in self.checked
+
+
+def read_coco(path):
+    """COCO annotations and, per image id, its objects as (category name, x1, y1, x2, y2), crowd regions left out."""
+    coco = json.loads(Path(path).read_text(encoding="utf-8"))
+    names = {category["id"]: category["name"] for category in coco["categories"]}
+    objects = {image["id"]: [] for image in coco["images"]}
+    for annotation in coco["annotations"]:
+        if not annotation.get("iscrowd"):
+            x, y, width, height = annotation["bbox"]
+            objects[annotation["image_id"]].append((names[annotation["category_id"]], x, y, x + width, y + height))
+    return coco, objects
 
 
 def reviewed_samples(review_dir):
@@ -39,14 +48,9 @@ def reviewed_samples(review_dir):
     categories, the objects of the other categories are therefore the model's own detections as the review saved
     them: pseudo-labels that keep the model as it was for those categories, while the checked ones are corrected.
     """
-    coco = json.loads((Path(review_dir) / ANNOTATIONS_FILE).read_text(encoding="utf-8"))
-    names = {category["id"]: category["name"] for category in coco["categories"]}
-    objects = {image["id"]: [] for image in coco["images"]}
-    for annotation in coco["annotations"]:
-        x, y, width, height = annotation["bbox"]
-        objects[annotation["image_id"]].append((names[annotation["category_id"]], x, y, x + width, y + height))
+    coco, objects = read_coco(Path(review_dir) / ANNOTATIONS_FILE)
     return [
-        Sample(image["file_name"], objects[image["id"]], "review",
+        Sample(image["file_name"], objects[image["id"]],
                None if image.get("entify_complete") else image.get("entify_checked"))
         for image in coco["images"] if image.get("entify_complete") or image.get("entify_checked")
     ]
@@ -68,16 +72,10 @@ def coco_samples(dataset, count, seed, exclude=()):
     """
     dataset = Path(dataset)
     exclude = set(exclude)
-    coco = json.loads((dataset / "annotations.json").read_text(encoding="utf-8"))
-    names = {category["id"]: category["name"] for category in coco["categories"]}
-    objects = {image["id"]: [] for image in coco["images"]}
-    for annotation in coco["annotations"]:
-        if not annotation.get("iscrowd"):
-            x, y, width, height = annotation["bbox"]
-            objects[annotation["image_id"]].append((names[annotation["category_id"]], x, y, x + width, y + height))
+    coco, objects = read_coco(dataset / "annotations.json")
     images = sorted((image for image in coco["images"] if image["file_name"] not in exclude), key=lambda image: image["id"])
     random.Random(seed).shuffle(images)
-    return [Sample(dataset / "images" / image["file_name"], objects[image["id"]], "coco") for image in images[:count]]
+    return [Sample(dataset / "images" / image["file_name"], objects[image["id"]]) for image in images[:count]]
 
 
 def split(samples, val_share, seed):
@@ -132,25 +130,22 @@ def next_model_dir(name):
     return MODEL_DIR / f"{base}_ft{number}"
 
 
-class ProgressBar:
+def progress_bar(steps):
     """Keras callback with a tqdm bar per epoch and the loss."""
+    import keras
 
-    def __init__(self, steps):
-        import keras
+    class ProgressBar(keras.callbacks.Callback):
+        def on_epoch_begin(self, epoch, logs=None):
+            self.bar = tqdm(total=steps, desc=f"epoch {epoch + 1}", unit="img")
 
-        class Callback(keras.callbacks.Callback):
-            def on_epoch_begin(callback, epoch, logs=None):
-                callback.bar = tqdm(total=steps, desc=f"epoch {epoch + 1}", unit="img")
-                callback.started = time.perf_counter()
+        def on_train_batch_end(self, batch, logs=None):
+            self.bar.update(1)
+            self.bar.set_postfix(loss=f"{(logs or {}).get('loss', float('nan')):.3f}")
 
-            def on_train_batch_end(callback, batch, logs=None):
-                callback.bar.update(1)
-                callback.bar.set_postfix(loss=f"{(logs or {}).get('loss', float('nan')):.3f}")
+        def on_epoch_end(self, epoch, logs=None):
+            self.bar.close()
 
-            def on_epoch_end(callback, epoch, logs=None):
-                callback.bar.close()
-
-        self.callback = Callback()
+    return ProgressBar()
 
 
 def finetune(model, train, epochs, learning_rate, freeze_backbone, seed):
@@ -172,7 +167,7 @@ def finetune(model, train, epochs, learning_rate, freeze_backbone, seed):
         data = dataset(train, model, seed)
         steps = sum(1 for sample in train if any(item[0] in model.categories for item in sample.objects))
         history = task.fit(data.repeat(epochs), epochs=epochs, steps_per_epoch=steps, verbose=0,
-                           callbacks=[ProgressBar(steps).callback])
+                           callbacks=[progress_bar(steps)])
     finally:
         task.preprocessor = preprocessor
         task.backbone.backbone.trainable = True

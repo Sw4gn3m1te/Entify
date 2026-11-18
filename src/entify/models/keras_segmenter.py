@@ -2,7 +2,7 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
-from entify.models.base import Detections, EntityModel, resize
+from entify.models.base import Detections, EntityModel, object_array, resize
 from entify.models.labels import BACKGROUND
 
 DEFAULT_MIN_AREA_SHARE = 0.0005
@@ -11,11 +11,6 @@ DEFAULT_MIN_AREA_SHARE = 0.0005
 def softmax(values):
     exponents = np.exp(values - values.max(axis=-1, keepdims=True))
     return exponents / exponents.sum(axis=-1, keepdims=True)
-
-
-def upscale(values, size, resample):
-    height, width = size
-    return np.asarray(Image.fromarray(values).resize((width, height), resample))
 
 
 class KerasSegmenter(EntityModel):
@@ -35,6 +30,7 @@ class KerasSegmenter(EntityModel):
         self.logits = logits
 
     def class_scores(self, image):
+        """Scores per pixel and output channel, and the category label of each channel (None for background)."""
         # Keep the aspect ratio and pad the rest (letterbox): stretching distorts shapes and hurts segmentation.
         input_height, input_width = self.input_size
         scale = min(input_height / image.shape[0], input_width / image.shape[1])
@@ -48,25 +44,26 @@ class KerasSegmenter(EntityModel):
         if scores.shape[-1] == 1:
             # A single output channel is the probability of the one category against everything else.
             foreground = 1 / (1 + np.exp(-scores)) if self.logits else scores
-            return np.concatenate([1 - foreground, foreground], axis=-1), (BACKGROUND, self.categories[0])
-        return (softmax(scores) if self.logits else scores), self.categories
+            return np.concatenate([1 - foreground, foreground], axis=-1), [None, 0]
+        return (softmax(scores) if self.logits else scores), list(range(len(self.categories)))
 
     def detect(self, image):
         size = image.shape[:2]
-        scores, categories = self.class_scores(image)
-        if scores.shape[-1] != len(categories):
-            raise ValueError(f"model returns {scores.shape[-1]} categories but {len(categories)} names are known")
-        class_map = upscale(scores.argmax(axis=-1).astype(np.int32), size, Image.NEAREST)
-        confidence_map = upscale(scores.max(axis=-1), size, Image.BILINEAR)
+        scores, channel_labels = self.class_scores(image)
+        if scores.shape[-1] != len(channel_labels):
+            raise ValueError(f"model returns {scores.shape[-1]} categories but {len(channel_labels)} names are known")
+        class_map = resize(scores.argmax(axis=-1).astype(np.int32), size, Image.NEAREST)
+        confidence_map = resize(scores.max(axis=-1), size)
 
         wanted = [
-            index for index, name in enumerate(categories)
-            if name.lower() != BACKGROUND and (self.selected is None or self.categories.index(name) in self.selected)
+            (channel, label) for channel, label in enumerate(channel_labels)
+            if label is not None and self.categories[label].lower() != BACKGROUND
+            and (self.selected is None or label in self.selected)
         ]
         min_area = self.min_area if self.min_area is not None else DEFAULT_MIN_AREA_SHARE * size[0] * size[1]
         boxes, object_scores, labels, masks = [], [], [], []
-        for index in wanted:
-            regions, count = ndimage.label(class_map == index)
+        for channel, label in wanted:
+            regions, _ = ndimage.label(class_map == channel)
             for number, (rows, columns) in enumerate(ndimage.find_objects(regions), 1):
                 mask = regions[rows, columns] == number
                 score = float(confidence_map[rows, columns][mask].mean())
@@ -74,10 +71,8 @@ class KerasSegmenter(EntityModel):
                     continue
                 boxes.append((columns.start, rows.start, columns.stop, rows.stop))
                 object_scores.append(score)
-                labels.append(self.categories.index(categories[index]))
+                labels.append(label)
                 masks.append(mask)
         if not boxes:
             return Detections.empty(with_masks=True)
-        mask_array = np.empty(len(masks), dtype=object)
-        mask_array[:] = masks
-        return Detections(np.array(boxes, dtype=float), np.array(object_scores), np.array(labels), mask_array)
+        return Detections(np.array(boxes, dtype=float), np.array(object_scores), np.array(labels), object_array(masks))

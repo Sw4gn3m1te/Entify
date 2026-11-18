@@ -33,8 +33,7 @@ class Detections:
     def concatenate(parts):
         masks = None
         if all(part.masks is not None for part in parts):
-            masks = np.empty(sum(len(part.masks) for part in parts), dtype=object)
-            masks[:] = [mask for part in parts for mask in part.masks]
+            masks = object_array([mask for part in parts for mask in part.masks])
         return Detections(
             np.concatenate([part.boxes for part in parts]).reshape(-1, 4),
             np.concatenate([part.scores for part in parts]),
@@ -70,7 +69,14 @@ class EntityModel:
         raise NotImplementedError
 
 
-def resize(image, size):
-    # Resize to the model input without cropping, because KerasHub preprocessors would center-crop to a square.
+def object_array(masks):
+    # A 1-D array with one mask per object; np.array() would stack masks of equal size into one 3-D array.
+    array = np.empty(len(masks), dtype=object)
+    array[:] = masks
+    return array
+
+
+def resize(image, size, resample=Image.BILINEAR):
+    # Resize without cropping: KerasHub preprocessors would center-crop model inputs to a square.
     height, width = size
-    return np.asarray(Image.fromarray(image).resize((width, height), Image.BILINEAR))
+    return np.asarray(Image.fromarray(image).resize((width, height), resample))

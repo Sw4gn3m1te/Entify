@@ -145,54 +145,55 @@ def label_fontsize(boxes, image_width):
     return points(max(pixels / 2, 6))
 
 
-def label_text(category, score, show_category, show_confidence):
-    parts = ([category] if show_category else []) + ([f"{score:.2f}"] if show_confidence else [])
-    return " ".join(parts)
+def draw_boxes(canvas, groups, colors, line_pixels):
+    # Segmented objects are already painted, so only box-only detections get a rectangle.
+    for category, detections in groups:
+        if detections.masks is None:
+            for x1, y1, x2, y2 in detections.boxes:
+                canvas.axes.add_patch(Rectangle((x1, y1), x2 - x1, y2 - y1, fill=False, edgecolor=colors[category],
+                                                linewidth=points(line_pixels)))
+
+
+def draw_legend(canvas, groups, colors):
+    """The count of each category in the top left corner. Returns the rectangles it covers."""
+    x, y = canvas.width * 0.01, canvas.height * 0.01
+    fontsize = points(max(8.0, canvas.width / 115))  # 1/115 of the image width, at least 8 px
+    occupied = []
+    for category, detections in groups:
+        artist, (width, height), pad = canvas.label(f"{category}: {len(detections.labels)}", colors[category], fontsize)
+        artist.set_position((x + pad, y + pad))
+        occupied.append((x, y, x + width, y + height))
+        y += height
+    return occupied
+
+
+def draw_labels(canvas, groups, colors, occupied, show_category, show_confidence, line_pixels):
+    # A label next to each object, placed where it covers the fewest other labels and boxes, linked by a short line.
+    objects = [(category, box, score) for category, detections in groups
+               for box, score in zip(detections.boxes, detections.scores)]
+    boxes = np.array([box for _, box, _ in objects], dtype=float).reshape(-1, 4)
+    fontsize = label_fontsize(boxes, canvas.width)
+    for index, (category, box, score) in enumerate(objects):
+        text = " ".join(([category] if show_category else []) + ([f"{score:.2f}"] if show_confidence else []))
+        artist, size, pad = canvas.label(text, colors[category], fontsize)
+        others = np.delete(boxes, index, axis=0)
+        rect = place_label(box, size, (canvas.width, canvas.height), occupied, others, line_pixels / 2)
+        artist.set_position((rect[0] + pad, rect[1] + pad))
+        occupied.append(rect)
+        xs, ys = gap_line(rect, box)
+        if np.hypot(xs[1] - xs[0], ys[1] - ys[0]) > line_pixels:
+            canvas.axes.plot(xs, ys, color=colors[category], linewidth=points(line_pixels / 2))
 
 
 def render(image, groups, show_confidence=False, dim_rest=False):
-    boxes = np.concatenate([np.zeros((0, 4))] + [detections.boxes for _, detections in groups])
     colors = dict(zip((category for category, _ in groups), COLORS * (len(groups) // len(COLORS) + 1)))
-    line_pixels = max(1.4, image.shape[1] / 576)
+    line_pixels = max(1.4, image.shape[1] / 576)  # 1/576 of the image width, at least 1.4 px
     if dim_rest:
         image = dim(image, groups)
-    image = paint_masks(image, groups, colors, max(1, round(line_pixels)))
-    canvas = Canvas(image)
-
-    for category, detections in groups:
-        if detections.masks is not None:
-            continue
-        for x1, y1, x2, y2 in detections.boxes:
-            canvas.axes.add_patch(
-                Rectangle((x1, y1), x2 - x1, y2 - y1, fill=False, edgecolor=colors[category], linewidth=points(line_pixels))
-            )
-
-    occupied = []
-    legend_y = canvas.height * 0.01
-    for category, detections in groups:
-        artist, (width, height), pad = canvas.label(f"{category}: {len(detections.labels)}", colors[category],
-                                                    points(max(8.0, canvas.width / 115)))
-        x = canvas.width * 0.01
-        artist.set_position((x + pad, legend_y + pad))
-        occupied.append((x, legend_y, x + width, legend_y + height))
-        legend_y += height
-
+    canvas = Canvas(paint_masks(image, groups, colors, max(1, round(line_pixels))))
+    draw_boxes(canvas, groups, colors, line_pixels)
+    occupied = draw_legend(canvas, groups, colors)
     show_category = len(groups) > 1
-    if not (show_category or show_confidence):
-        return canvas.figure
-
-    fontsize = label_fontsize(boxes, canvas.width)
-    index = 0
-    for category, detections in groups:
-        for box, score in zip(detections.boxes, detections.scores):
-            others = np.delete(boxes, index, axis=0)
-            index += 1
-            text = label_text(category, score, show_category, show_confidence)
-            artist, size, pad = canvas.label(text, colors[category], fontsize)
-            rect = place_label(box, size, (canvas.width, canvas.height), occupied, others, line_pixels / 2)
-            artist.set_position((rect[0] + pad, rect[1] + pad))
-            occupied.append(rect)
-            xs, ys = gap_line(rect, box)
-            if np.hypot(xs[1] - xs[0], ys[1] - ys[0]) > line_pixels:
-                canvas.axes.plot(xs, ys, color=colors[category], linewidth=points(line_pixels / 2))
+    if show_category or show_confidence:
+        draw_labels(canvas, groups, colors, occupied, show_category, show_confidence, line_pixels)
     return canvas.figure

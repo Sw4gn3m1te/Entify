@@ -20,7 +20,6 @@ DEFAULT_DATASET = Path("data/coco_subset")
 DEFAULT_EVALUATION_OUT = Path("outputs/evaluation")
 DEFAULT_REVIEW_DIR = Path("reviews")
 DEFAULT_THRESHOLDS = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
-DEFAULT_MIN_AREA = None
 ALL_SORTS = "*"
 
 
@@ -283,11 +282,13 @@ def finetune_report(base, out, args, before, after, losses, minutes, checked):
     return "\n".join(lines) + "\n"
 
 
-def add_model_options(parser):
-    parser.add_argument(
-        "-m", "--model", "--preset", dest="model", default=DEFAULT_MODEL, metavar="MODEL",
-        help=f"KerasHub preset, model folder, .keras file or SavedModel (default: {DEFAULT_MODEL})",
-    )
+def add_model_options(parser, model=True):
+    # model=False leaves out -m, for scripts that take several models.
+    if model:
+        parser.add_argument(
+            "-m", "--model", "--preset", dest="model", default=DEFAULT_MODEL, metavar="MODEL",
+            help=f"KerasHub preset, model folder, .keras file or SavedModel (default: {DEFAULT_MODEL})",
+        )
     parser.add_argument(
         "--labels", type=Path, metavar="FILE",
         help="category names of the model, one per line or a JSON list (needed for models Entify does not know)",
@@ -297,7 +298,7 @@ def add_model_options(parser):
         help="maximum overlap (IoU) between two detections before the weaker one is removed, 1 keeps all (default: 0.5)",
     )
     parser.add_argument(
-        "--min-area", type=int, default=DEFAULT_MIN_AREA, metavar="PIXELS",
+        "--min-area", type=int, metavar="PIXELS",
         help="segmentation models: smallest region in pixels that counts as an object (default: 0.05%% of the image area)",
     )
     parser.add_argument(

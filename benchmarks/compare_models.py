@@ -15,7 +15,8 @@ from pathlib import Path
 import numpy as np
 
 from entify import __version__
-from entify.cli import DEFAULT_THRESHOLDS, find_objects, fraction, progress
+from entify.cli import DEFAULT_THRESHOLDS, add_model_options, find_objects, fraction, progress
+from entify.geometry import iou
 from entify.images import load_image
 from entify.models import DEFAULT_MODEL, ModelError, load_model
 
@@ -102,17 +103,6 @@ def holdout_dataset(args, excluded):
 
 # ---------- scoring ----------
 
-def iou(box, boxes):
-    x1 = np.maximum(box[0], boxes[:, 0])
-    y1 = np.maximum(box[1], boxes[:, 1])
-    x2 = np.minimum(box[2], boxes[:, 2])
-    y2 = np.minimum(box[3], boxes[:, 3])
-    inter = np.clip(x2 - x1, 0, None) * np.clip(y2 - y1, 0, None)
-    area = (box[2] - box[0]) * (box[3] - box[1])
-    areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-    return inter / np.maximum(area + areas - inter, 1e-9)
-
-
 def match(boxes, scores, truth, min_iou):
     """True positive flag per detection: greedy by score, each true box matched at most once (as in COCO).
 
@@ -124,8 +114,8 @@ def match(boxes, scores, truth, min_iou):
     for index in np.argsort(-scores, kind="stable"):
         if not free.any():
             break
-        overlaps = np.where(free, iou(boxes[index], truth), -1) if len(truth) else np.array([])
-        if len(overlaps) and overlaps.max() >= min_iou:
+        overlaps = np.where(free, iou(boxes[index], truth), -1)
+        if overlaps.max() >= min_iou:
             hits[index] = True
             free[overlaps.argmax()] = False
     return hits
@@ -146,7 +136,7 @@ def average_precision(scores, hits, positives):
 
 
 def score_model(spec, args, dataset, truth):
-    model = load_model(spec, args.labels, SCORE_FLOOR, args.overlap)
+    model = load_model(spec, args.labels, SCORE_FLOOR, args.overlap, args.min_area, args.verbose)
     if args.category not in model.categories:
         raise SystemExit(f"compare_models: model {spec} has no category {args.category!r}")
     label = model.categories.index(args.category)
@@ -283,10 +273,7 @@ def main():
     parser.add_argument("--seed", type=int, default=0, help="seed for choosing the images (default: 0)")
     parser.add_argument("--thresholds", type=fraction, nargs="+", default=DEFAULT_THRESHOLDS, metavar="VALUE")
     parser.add_argument("--iou", type=fraction, default=0.5, help="overlap a box needs to count as found (default: 0.5)")
-    parser.add_argument("--labels", type=Path, metavar="FILE")
-    parser.add_argument("-o", "--overlap", type=fraction, default=0.5)
-    parser.add_argument("-t", "--tile", action="store_true")
-    parser.add_argument("--sharpen", type=float, nargs="?", const=1.0, metavar="AMOUNT")
+    add_model_options(parser, model=False)
     args = parser.parse_args()
     args.thresholds = sorted(set(args.thresholds))
     if args.models is None:
@@ -308,7 +295,7 @@ def main():
             raise SystemExit(f"compare_models: {error}")
     write_report(args, results, truth, sources, dataset)
     print(f"\nResults written to {RESULTS_FILE}")
-    print((REPO_DIR / RESULTS_FILE).read_text(encoding="utf-8").split("## By confidence")[0].split("## Summary")[1])
+    print(RESULTS_FILE.read_text(encoding="utf-8").split("## By confidence")[0].split("## Summary")[1])
 
 
 if __name__ == "__main__":
