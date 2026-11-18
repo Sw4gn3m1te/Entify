@@ -61,9 +61,13 @@ def describe_checked(samples):
     return ", ".join(f"{count} {key}" for key, count in sorted(groups.items(), key=lambda item: item[0] != "fully"))
 
 
-def coco_samples(dataset, count, seed):
-    # Random images from a COCO-format dataset (data/coco_subset), mixed in so the model keeps the other categories.
+def coco_samples(dataset, count, seed, exclude=()):
+    """Random images from a COCO-format dataset (data/coco_subset), mixed in so the model keeps the other categories.
+
+    exclude: file names to leave out, e.g. the reviewed images, so none is trained on both its review and COCO's labels.
+    """
     dataset = Path(dataset)
+    exclude = set(exclude)
     coco = json.loads((dataset / "annotations.json").read_text(encoding="utf-8"))
     names = {category["id"]: category["name"] for category in coco["categories"]}
     objects = {image["id"]: [] for image in coco["images"]}
@@ -71,7 +75,7 @@ def coco_samples(dataset, count, seed):
         if not annotation.get("iscrowd"):
             x, y, width, height = annotation["bbox"]
             objects[annotation["image_id"]].append((names[annotation["category_id"]], x, y, x + width, y + height))
-    images = sorted(coco["images"], key=lambda image: image["id"])
+    images = sorted((image for image in coco["images"] if image["file_name"] not in exclude), key=lambda image: image["id"])
     random.Random(seed).shuffle(images)
     return [Sample(dataset / "images" / image["file_name"], objects[image["id"]], "coco") for image in images[:count]]
 

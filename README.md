@@ -134,7 +134,7 @@ Continues training the detector on the reviewed images and saves the result as a
 
 - Only checked images are used: on any other image, an object nobody marked would teach the model that it is background. Images reviewed with `-s` (e.g. only for person) count as well: their other objects are the model's own detections as the review saved them, so the model is corrected for the checked categories and stays as it was for the rest.
 - The pretrained backbone stays frozen and the learning rate is low, so a few corrections adjust the model instead of overwriting what it knows. `--unfreeze-all` trains the backbone too.
-- `--mix-coco` mixes COCO images (from `scripts/fetch_coco_subset.py`) into the training, so the model keeps recognising the categories you did not correct. This only applies to models with the COCO categories.
+- `--mix-coco` mixes COCO images (from `scripts/fetch_coco_subset.py`) into the training, so the model keeps recognising the categories you did not correct. Reviewed images are left out of it, so no image is trained on both your labels and COCO's. This only applies to models with the COCO categories.
 - Before and after training, Entify counts the objects on the reviewed images (part of them held out with `--val-split`, only the checked categories) and on further COCO images (`--check-coco`). The comparison is printed and saved as `finetune_report.md` in the new model folder, and `entify.json` there lists every image used, so benchmarks can leave them out.
 
 Fine-tuning works for object detectors (D-FINE). On a laptop CPU, one training step takes several seconds per image, so 50 COCO plus 20 reviewed images over 5 epochs take about 45 minutes.
@@ -195,6 +195,15 @@ python benchmarks/run_benchmark.py [--seed N] [-t] [--sharpen [AMOUNT]] [--thres
 
 Downloads a COCO val2017 subset chosen by the seed (default: 0) into `benchmarks/data`, compares Entify's counts with the COCO ground truth and writes the results to [`benchmarks/benchmark_results.md`](benchmarks/benchmark_results.md).
 The first run downloads the COCO annotations (about 240 MB).
+
+### Fine-tuned against original
+
+```bash
+python benchmarks/compare_models.py -m dfine_small_coco -m models/dfine_small_coco_ft1 [--category person] [--images 200]
+```
+
+Compares models on one category (default: person) with the original COCO annotations as ground truth, on 200 COCO val2017 images that none of the models was trained or checked on: both COCO subsets of this repository and every image a fine-tuned model lists in its `entify.json` are left out. 50 of the images have no person, to count false detections; the others have 1-2, 3-6 or 7 and more people in equal shares.
+For each model it reports precision, recall and F1 of the boxes (IoU 0.5) and the counting error per confidence threshold, plus AP50, in [`benchmarks/model_comparison.md`](benchmarks/model_comparison.md). Without `-m`, it compares `dfine_small_coco` with every fine-tuned model in `models/`.
 
 ## License
 

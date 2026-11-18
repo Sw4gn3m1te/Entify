@@ -204,8 +204,15 @@ def finetune(args):
         elif not (args.coco / "annotations.json").exists():
             print(f"COCO images are not mixed in: {args.coco} not found (python scripts/fetch_coco_subset.py)")
         else:
-            coco = training.coco_samples(args.coco, args.mix_coco + args.check_coco, args.seed)
-            coco_train, coco_check = coco[:args.mix_coco], coco[args.mix_coco:]
+            wanted = args.mix_coco + args.check_coco
+            coco = training.coco_samples(args.coco, wanted, args.seed, {sample.path.name for sample in reviewed})
+            mix = args.mix_coco
+            if len(coco) < wanted:
+                # The reviewed images are left out, so a small dataset may not have enough left: split what there is.
+                mix = round(len(coco) * args.mix_coco / wanted)
+                print(f"Only {len(coco)} COCO images in {args.coco} besides the reviewed ones: "
+                      f"{mix} mixed in, {len(coco) - mix} for the check")
+            coco_train, coco_check = coco[:mix], coco[mix:]
     train = review_train + coco_train
     print(f"Training on {len(review_train)} reviewed ({training.describe_checked(review_train)}) and "
           f"{len(coco_train)} COCO images, checking on {len(review_check)} held-out reviewed and "
