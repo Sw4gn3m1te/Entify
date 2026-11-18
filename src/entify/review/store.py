@@ -9,8 +9,9 @@ class ReviewStore:
     """Reviewed images and their objects, saved as a COCO annotation file.
 
     Images use absolute paths as file_name, so `entify evaluate REVIEW_DIR` and `entify finetune REVIEW_DIR` can find
-    them. Extra fields: images have "entify_complete" (every object in the image was checked), annotations have
-    "entify_source" (model, adjusted, manual or snapped).
+    them. Extra fields: images have "entify_complete" (every object in the image was checked) and "entify_checked" (the
+    categories whose objects were all checked, from `entify review -s`), annotations have "entify_source" (model,
+    adjusted, manual or snapped).
     """
 
     def __init__(self, folder, categories, model_name):
@@ -29,7 +30,8 @@ class ReviewStore:
         for image in coco["images"]:
             self.images[image["file_name"]] = {
                 "width": image["width"], "height": image["height"],
-                "complete": image.get("entify_complete", False), "objects": [],
+                "complete": image.get("entify_complete", False), "checked": image.get("entify_checked", []),
+                "objects": [],
             }
         for annotation in coco["annotations"]:
             x, y, width, height = annotation["bbox"]
@@ -43,10 +45,10 @@ class ReviewStore:
     def get(self, image_path):
         return self.images.get(str(Path(image_path).resolve()))
 
-    def put(self, image_path, size, objects, complete):
+    def put(self, image_path, size, objects, complete, checked=()):
         width, height = size
         self.images[str(Path(image_path).resolve())] = {
-            "width": width, "height": height, "complete": complete, "objects": objects,
+            "width": width, "height": height, "complete": complete, "checked": sorted(set(checked)), "objects": objects,
         }
         for item in objects:
             if item["category"] not in self.categories:
@@ -61,6 +63,8 @@ class ReviewStore:
                 "id": image_id, "file_name": file_name, "width": image["width"], "height": image["height"],
                 "entify_complete": image["complete"],
             })
+            if image["checked"]:
+                images[-1]["entify_checked"] = image["checked"]
             for item in image["objects"]:
                 x1, y1, x2, y2 = item["box"]
                 annotation = {

@@ -2,6 +2,7 @@ import argparse
 import time
 from pathlib import Path
 
+import numpy as np
 from tqdm import tqdm
 
 from entify import __version__
@@ -158,9 +159,12 @@ def review(args):
         raise SystemExit('entify: the review app needs extra packages: pip install -e ".[review]"')
     paths = image_paths(args)
     model = open_model(args, args.confidence)
+    scope = None if not args.sort or ALL_SORTS in args.sort else list(dict.fromkeys(args.sort))
+    if scope:
+        check_categories(model, scope)
     out = args.out or DEFAULT_REVIEW_DIR / (args.path.stem if args.path.is_file() else args.path.resolve().name)
     run_review(paths, model, lambda model, image: find_objects(model, image, args), out, args.port,
-               not args.no_browser, args.verbose)
+               not args.no_browser, args.verbose, scope)
 
 
 def count_accuracy(model, samples, args):
@@ -168,7 +172,12 @@ def count_accuracy(model, samples, args):
 
     predictions = {}
     for sample in progress(samples):
-        predictions[sample.path.name] = find_objects(model, load_image(sample.path), args)
+        detections = find_objects(model, load_image(sample.path), args)
+        # On images checked only for some categories, only those are counted (the others are not ground truth).
+        if sample.checked is not None:
+            detections = detections.where(np.isin(detections.labels,
+                                                  [model.categories.index(name) for name in sample.checked]))
+        predictions[sample.path.name] = detections
     summary, *_ = evaluation.evaluate(ground_truth_pairs(samples), predictions, [args.confidence], model.categories)
     row = summary.iloc[0]
     return {
@@ -182,7 +191,7 @@ def finetune(args):
 
     reviewed = training.reviewed_samples(args.path)
     if not reviewed:
-        raise SystemExit(f"entify: no image in {args.path} is marked as 'all objects checked'")
+        raise SystemExit(f"entify: no image in {args.path} is marked as checked (the checkbox in entify review)")
     model = open_model(args, args.confidence)
     if model.kind != "boxes":
         raise SystemExit("entify: fine-tuning is only supported for object detectors")
@@ -198,8 +207,11 @@ def finetune(args):
             coco = training.coco_samples(args.coco, args.mix_coco + args.check_coco, args.seed)
             coco_train, coco_check = coco[:args.mix_coco], coco[args.mix_coco:]
     train = review_train + coco_train
-    print(f"Training on {len(review_train)} reviewed and {len(coco_train)} COCO images, "
-          f"checking on {len(review_check)} held-out reviewed and {len(coco_check)} COCO images")
+    print(f"Training on {len(review_train)} reviewed ({training.describe_checked(review_train)}) and "
+          f"{len(coco_train)} COCO images, checking on {len(review_check)} held-out reviewed and "
+          f"{len(coco_check)} COCO images")
+    if any(sample.checked is not None for sample in reviewed):
+        print("Images checked only for some categories keep the model's own detections for the other categories")
 
     checks = [
         ("reviewed images, used for training", review_train),
@@ -220,20 +232,26 @@ def finetune(args):
         "base_model": model.name,
         "training": {
             "review": str(args.path), "reviewed_images": len(review_train), "coco_images": len(coco_train),
+            "reviewed_checked": training.describe_checked(review_train),
             "epochs": args.epochs, "learning_rate": args.lr, "backbone_frozen": not args.unfreeze_all,
             "seed": args.seed, "loss_per_epoch": losses,
+            # Every image the model saw in training or the check, so benchmarks can leave them out.
+            "images": {
+                "train": [str(sample.path.resolve()) for sample in train],
+                "check": [str(sample.path.resolve()) for sample in review_check + coco_check],
+            },
         },
     })
     print(f"\nSaved to {out}. Counting accuracy after fine-tuning (model loaded from there)")
     tuned = load_model(out, args.labels, args.confidence, args.overlap, args.min_area, args.verbose)
     after = {name: count_accuracy(tuned, samples, args) for name, samples in checks}
 
-    report = finetune_report(model.name, out, args, before, after, losses, minutes)
+    report = finetune_report(model.name, out, args, before, after, losses, minutes, training.describe_checked(reviewed))
     (Path(out) / "finetune_report.md").write_text(report, encoding="utf-8")
     print("\n" + report)
 
 
-def finetune_report(base, out, args, before, after, losses, minutes):
+def finetune_report(base, out, args, before, after, losses, minutes, checked):
     lines = [
         f"# Fine-tuning {Path(base).name}",
         "",
@@ -242,6 +260,7 @@ def finetune_report(base, out, args, before, after, losses, minutes):
         f"Epochs: {args.epochs}, learning rate: {args.lr}, backbone {'trained' if args.unfreeze_all else 'frozen'}, "
         f"seed: {args.seed}, training time: {minutes:.1f} min.",
         f"Loss per epoch: {', '.join(f'{loss:.3f}' for loss in losses)}.",
+        f"Reviewed images checked: {checked}.",
         "",
         f"Counting accuracy at confidence {args.confidence}:",
         "",
@@ -252,7 +271,8 @@ def finetune_report(base, out, args, before, after, losses, minutes):
         b, a = before[name], after[name]
         lines.append(f"| {name} | {b['images']} | {b['true']} | {b['predicted']} | {a['predicted']} "
                      f"| {b['mae']:.2f} | {a['mae']:.2f} |")
-    lines += ["", "MAE: mean absolute counting error per image, lower is better."]
+    lines += ["", "MAE: mean absolute counting error per image, lower is better. On images checked only for some "
+              "categories, only those categories are counted."]
     return "\n".join(lines) + "\n"
 
 
@@ -349,6 +369,11 @@ def build_parser():
     review_parser = commands.add_parser(
         "review", parents=[input_options, model_options],
         help="check and correct the detections in a browser, saved as COCO annotations",
+    )
+    review_parser.add_argument(
+        "-s", "--sort", action="extend", nargs="+", metavar="CATEGORY",
+        help="only check these categories, e.g. -s person: the checkbox then means all objects of these categories "
+             "are checked, and only they are shown at first (default: all categories)",
     )
     review_parser.add_argument(
         "--out", type=Path, metavar="FOLDER",

@@ -17,16 +17,28 @@ from entify.review.store import ANNOTATIONS_FILE
 
 
 class Sample:
-    """One training image: its path and its objects as (category name, x1, y1, x2, y2) in image pixels."""
+    """One training image: its path and its objects as (category name, x1, y1, x2, y2) in image pixels.
 
-    def __init__(self, path, objects, source):
+    checked: the categories whose objects were all checked by a person, None if all of them were.
+    """
+
+    def __init__(self, path, objects, source, checked=None):
         self.path = Path(path)
         self.objects = objects
         self.source = source
+        self.checked = None if checked is None else frozenset(checked)
+
+    def counts(self, category):
+        return self.checked is None or category in self.checked
 
 
 def reviewed_samples(review_dir):
-    # Only fully checked images: an unmarked object would teach the model that it is background.
+    """Reviewed images that are fully checked, or checked for some categories (entify review -s).
+
+    An object nobody marked would teach the model that it is background. On an image checked only for some
+    categories, the objects of the other categories are therefore the model's own detections as the review saved
+    them: pseudo-labels that keep the model as it was for those categories, while the checked ones are corrected.
+    """
     coco = json.loads((Path(review_dir) / ANNOTATIONS_FILE).read_text(encoding="utf-8"))
     names = {category["id"]: category["name"] for category in coco["categories"]}
     objects = {image["id"]: [] for image in coco["images"]}
@@ -34,9 +46,19 @@ def reviewed_samples(review_dir):
         x, y, width, height = annotation["bbox"]
         objects[annotation["image_id"]].append((names[annotation["category_id"]], x, y, x + width, y + height))
     return [
-        Sample(image["file_name"], objects[image["id"]], "review")
-        for image in coco["images"] if image.get("entify_complete")
+        Sample(image["file_name"], objects[image["id"]], "review",
+               None if image.get("entify_complete") else image.get("entify_checked"))
+        for image in coco["images"] if image.get("entify_complete") or image.get("entify_checked")
     ]
+
+
+def describe_checked(samples):
+    """How many images are fully checked and how many only for some categories, e.g. '4 fully, 30 for person'."""
+    groups = {}
+    for sample in samples:
+        key = "fully" if sample.checked is None else "for " + ", ".join(sorted(sample.checked))
+        groups[key] = groups.get(key, 0) + 1
+    return ", ".join(f"{count} {key}" for key, count in sorted(groups.items(), key=lambda item: item[0] != "fully"))
 
 
 def coco_samples(dataset, count, seed):
@@ -164,7 +186,8 @@ def save_finetuned(model, out_dir, settings):
 
 
 def ground_truth_pairs(samples):
-    return [(sample.path.name, name) for sample in samples for name, *_ in sample.objects]
+    # Only checked categories: pseudo-labels are the model's own detections and would make it look better than it is.
+    return [(sample.path.name, name) for sample in samples for name, *_ in sample.objects if sample.counts(name)]
 
 
 def uses_coco_categories(model):

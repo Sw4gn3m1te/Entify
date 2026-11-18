@@ -367,10 +367,13 @@ function categoryOptions(query) {
     matches.sort((a, b) => starts(b) - starts(a) || a.localeCompare(b));
     return matches.map((name) => ({ name }));
   }
-  const recent = state.recent.filter((name) => all.includes(name));
-  const inImage = [...new Set(state.objects.map((item) => item.category))].filter((name) => !recent.includes(name)).sort();
-  const rest = [...all].sort().filter((name) => !recent.includes(name) && !inImage.includes(name));
+  const scope = state.session.scope || [];
+  const recent = state.recent.filter((name) => all.includes(name) && !scope.includes(name));
+  const inImage = [...new Set(state.objects.map((item) => item.category))]
+    .filter((name) => !scope.includes(name) && !recent.includes(name)).sort();
+  const rest = [...all].sort().filter((name) => !scope.includes(name) && !recent.includes(name) && !inImage.includes(name));
   return [
+    ...scope.map((name) => ({ name, group: "Checked in this review" })),
     ...recent.map((name) => ({ name, group: "Recent" })),
     ...inImage.map((name) => ({ name, group: "In this image" })),
     ...rest.map((name) => ({ name, group: "All categories" })),
@@ -491,8 +494,10 @@ function categoryCounts() {
   return counts;
 }
 
+const hiddenKey = () => `hidden:${state.session.output}:${(state.session.scope || ["*"]).join(",")}`;
+
 function saveHidden() {
-  storeSetting(`hidden:${state.session.output}`, [...state.hidden]);
+  storeSetting(hiddenKey(), [...state.hidden]);
   const item = state.objects[state.selected];
   if (item && !isVisible(item)) state.selected = -1;
   updateButtons();
@@ -633,7 +638,9 @@ function renderList() {
   });
   const reviewed = state.session.images.filter((image) => image.reviewed).length;
   const complete = state.session.images.filter((image) => image.complete).length;
-  el("progress").textContent = `${reviewed} of ${state.session.images.length} reviewed, ${complete} complete`;
+  const scope = state.session.scope;
+  el("progress").textContent = `${reviewed} of ${state.session.images.length} reviewed, ${complete} `
+    + (scope ? `checked for ${scope.join(", ")}` : "complete");
 }
 
 async function save() {
@@ -703,9 +710,17 @@ async function init() {
   state.session = await api("/api/session");
   const categories = state.session.categories;
   el("model").textContent = `Model: ${state.session.model}`;
+  const scope = state.session.scope;
   state.recent = loadSetting("recent", []).filter((name) => categories.includes(name));
-  state.category = state.recent[0] || categories[0];
-  state.hidden = new Set(loadSetting(`hidden:${state.session.output}`, []).filter((name) => categories.includes(name)));
+  state.category = scope ? state.recent.find((name) => scope.includes(name)) || scope[0] : state.recent[0] || categories[0];
+  // With a scope (entify review -s), only its categories are shown at first.
+  const hidden = loadSetting(hiddenKey(), scope ? categories.filter((name) => !scope.includes(name)) : []);
+  state.hidden = new Set(hidden.filter((name) => categories.includes(name)));
+  if (scope) {
+    const names = scope.join(", ");
+    el("complete-text").textContent = `All ${names} objects checked`;
+    el("complete-label").title = `Every ${names} object in this image is marked; other categories are not checked (C)`;
+  }
   renderFilter();
   window.addEventListener("resize", resizeCanvas);
   resizeCanvas();

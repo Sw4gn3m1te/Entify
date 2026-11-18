@@ -58,7 +58,7 @@ entify finetune REVIEW_FOLDER [options]                     # train the detector
 | `DATASET` | – | `evaluate` only: folder with `images/` and `annotations.json` (default: `data/coco_subset`) |
 | `-c` | `--confidence` | `detect`, `highlight`: minimum detection score, 0 to 1 (default: 0.5) <br> 0 = accept all detections, 1 = reject all detections  |
 | `-o` | `--overlap` | Maximum overlap (IoU) of two detections, 0 to 1 (default: 0.5) <br> 0 = allow no overlap, 1 = allow identical boxes |
-| `-s` | `--sort` | `highlight` only, required: one or more categories of the model to highlight, `*` selects all (Git Bash: `'*'`) <br> `-s bird car` and `-s bird -s car` both work, quote names with spaces: `-s "cell phone"` |
+| `-s` | `--sort` | `highlight`, required: one or more categories of the model to highlight, `*` selects all (Git Bash: `'*'`) <br> `review`, optional: only check these categories (see [Reviewing detections](#reviewing-detections)) <br> `-s bird car` and `-s bird -s car` both work, quote names with spaces: `-s "cell phone"` |
 | `-m` | `--model` | KerasHub preset, model folder, `.keras` file or SavedModel (default: `dfine_small_coco`). `--preset` still works |
 | – | `--labels` | Category names for a model Entify does not know: text file with one name per line, or a JSON list |
 | – | `--min-area` | Segmentation models: smallest region in pixels that counts as an object (default: 0.05 % of the image area) |
@@ -104,6 +104,8 @@ entify review photos/ -c 0.4
 
 Opens a local web page (http://127.0.0.1:8123) with one image at a time and the model's detections as boxes.
 
+To check only some categories, name them: `entify review photos/ -s person`. Only those are shown at first, and the checkbox then means "all person objects checked". The other categories keep the model's detections, which fine-tuning uses as they are.
+
 | Action | How |
 |---|---|
 | Reject a wrong detection or restore it | select the box, then `Delete` or the Reject button |
@@ -114,7 +116,7 @@ Opens a local web page (http://127.0.0.1:8123) with one image at a time and the 
 | Fix a box | select it, then drag it or one of its handles |
 | Tighten a rough box | select it, then `S` or Snap: Segment Anything finds the object inside the box |
 | Show only some categories | `F` or the Show button: tick the categories to show. Hidden boxes stay saved, nothing is detected again |
-| Mark the image as fully checked | `C` or the checkbox: every object of every category is marked |
+| Mark the image as fully checked | `C` or the checkbox: every object of every category is marked (with `-s`: every object of those categories) |
 | Undo, save, next/previous image | `Ctrl+Z`, `Ctrl+S`, `→` / `←` (switching images saves) |
 | Zoom and pan | mouse wheel, right-drag or `Space` + drag |
 
@@ -130,10 +132,10 @@ entify finetune reviews/photos [--epochs 5] [--lr 1e-5] [--mix-coco 50]
 
 Continues training the detector on the reviewed images and saves the result as a new model, e.g. `models/dfine_small_coco_ft1/`. The original model is never changed. Use the new one with `-m models/dfine_small_coco_ft1`.
 
-- Only images marked as "all objects checked" are used. On any other image, an object nobody marked would teach the model that it is background.
+- Only checked images are used: on any other image, an object nobody marked would teach the model that it is background. Images reviewed with `-s` (e.g. only for person) count as well: their other objects are the model's own detections as the review saved them, so the model is corrected for the checked categories and stays as it was for the rest.
 - The pretrained backbone stays frozen and the learning rate is low, so a few corrections adjust the model instead of overwriting what it knows. `--unfreeze-all` trains the backbone too.
 - `--mix-coco` mixes COCO images (from `scripts/fetch_coco_subset.py`) into the training, so the model keeps recognising the categories you did not correct. This only applies to models with the COCO categories.
-- Before and after training, Entify counts the objects on the reviewed images (part of them held out with `--val-split`) and on further COCO images (`--check-coco`). The comparison is printed and saved as `finetune_report.md` in the new model folder.
+- Before and after training, Entify counts the objects on the reviewed images (part of them held out with `--val-split`, only the checked categories) and on further COCO images (`--check-coco`). The comparison is printed and saved as `finetune_report.md` in the new model folder, and `entify.json` there lists every image used, so benchmarks can leave them out.
 
 Fine-tuning works for object detectors (D-FINE). On a laptop CPU, one training step takes several seconds per image, so 50 COCO plus 20 reviewed images over 5 epochs take about 45 minutes.
 

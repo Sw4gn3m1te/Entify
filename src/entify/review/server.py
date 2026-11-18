@@ -74,7 +74,8 @@ class Preparer:
                 print(f"Preparing in the background failed: {error}")
 
 
-def create_app(paths, model, find_objects, store, snapper, prepare=True):
+def create_app(paths, model, find_objects, store, snapper, prepare=True, scope=None):
+    """The review app. scope: categories this review checks (entify review -s), None for all categories."""
     app = FastAPI(title="Entify review")
     model_lock = threading.Lock()
     proposals = {}
@@ -86,11 +87,17 @@ def create_app(paths, model, find_objects, store, snapper, prepare=True):
             raise HTTPException(404, "no such image")
         return paths[image_id]
 
+    def checked(saved):
+        # The checkbox of the page: every object checked, or with a scope, every object of the scope's categories.
+        if saved is None:
+            return False
+        return saved["complete"] or (scope is not None and set(scope) <= set(saved["checked"]))
+
     def status(index, path):
         saved = store.get(path)
         return {
             "id": index, "name": path.name, "width": sizes[index][0], "height": sizes[index][1],
-            "reviewed": saved is not None, "complete": bool(saved and saved["complete"]),
+            "reviewed": saved is not None, "complete": checked(saved),
         }
 
     def detect(image_id):
@@ -132,6 +139,7 @@ def create_app(paths, model, find_objects, store, snapper, prepare=True):
             "model": model.name,
             "kind": model.kind,
             "categories": list(model.selectable_categories),
+            "scope": scope,
             "output": str(store.path),
             "images": [status(index, path) for index, path in enumerate(paths)],
         }
@@ -151,7 +159,7 @@ def create_app(paths, model, find_objects, store, snapper, prepare=True):
         path = image_path(image_id)
         saved = store.get(path)
         if saved is not None:
-            result = {"objects": saved["objects"], "complete": saved["complete"], "saved": True}
+            result = {"objects": saved["objects"], "complete": checked(saved), "saved": True}
         else:
             result = {"objects": detect(image_id), "complete": False, "saved": False}
         prepare_around(image_id)
@@ -161,7 +169,15 @@ def create_app(paths, model, find_objects, store, snapper, prepare=True):
     def save(image_id: int, update: ReviewUpdate):
         path = image_path(image_id)
         objects = [item.model_dump() for item in update.objects]
-        store.put(path, sizes[image_id], objects, update.complete)
+        saved = store.get(path)
+        complete, categories = (saved["complete"], set(saved["checked"])) if saved else (False, set())
+        if scope is None:
+            complete = update.complete
+        elif update.complete:
+            categories |= set(scope)
+        else:
+            complete, categories = False, categories - set(scope)
+        store.put(path, sizes[image_id], objects, complete, categories)
         return status(image_id, path)
 
     @app.post("/api/images/{image_id}/snap")
@@ -176,11 +192,11 @@ def create_app(paths, model, find_objects, store, snapper, prepare=True):
     return app
 
 
-def run_review(paths, model, find_objects, out_dir, port=8123, open_browser=True, verbose=False):
+def run_review(paths, model, find_objects, out_dir, port=8123, open_browser=True, verbose=False, scope=None):
     import uvicorn
 
     store = ReviewStore(out_dir, model.selectable_categories, model.name)
-    app = create_app(paths, model, find_objects, store, BoxSnapper(verbose))
+    app = create_app(paths, model, find_objects, store, BoxSnapper(verbose), scope=scope)
     url = f"http://127.0.0.1:{port}/"
     print(f"Review {len(paths)} images at {url}  (corrections are saved to {store.path}, stop with Ctrl+C)")
     if open_browser:
