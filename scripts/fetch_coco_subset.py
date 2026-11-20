@@ -40,6 +40,14 @@ def usable_images(coco):
     }
 
 
+def subset_image_ids(folders):
+    ids = set()
+    for folder in folders:
+        subset = json.loads((folder / "annotations.json").read_text(encoding="utf-8"))
+        ids |= {image["id"] for image in subset["images"]}
+    return ids
+
+
 def pick_diverse(candidates, annotations, count, covered):
     picked = []
     pool = list(candidates)
@@ -87,12 +95,19 @@ def main():
     parser.add_argument("--diverse", type=int, default=25, help="images chosen to cover remaining categories")
     parser.add_argument("--seed", type=int, default=0, help="seed for the image selection, same seed gives the same subset (default: %(default)s)")
     parser.add_argument("--data-dir", type=Path, default=DATA_DIR)
+    parser.add_argument("--name", default="coco_subset", help="folder for the subset inside --data-dir (default: %(default)s)")
+    parser.add_argument(
+        "--exclude", type=Path, nargs="+", default=[], metavar="FOLDER",
+        help="subset folders with an annotations.json whose images are left out",
+    )
     args = parser.parse_args()
 
-    out_dir = args.data_dir / "coco_subset"
+    out_dir = args.data_dir / args.name
     image_dir = out_dir / "images"
     coco = load_annotations(args.data_dir / "cache")
     annotations = usable_images(coco)
+    for image_id in subset_image_ids(args.exclude):
+        annotations.pop(image_id, None)
     selected = select(annotations, args.dense, args.medium, args.diverse, args.seed)
 
     images_by_id = {image["id"]: image for image in coco["images"]}
